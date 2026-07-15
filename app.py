@@ -132,7 +132,7 @@ def get_paper_account(
 def get_paper_positions(authorization: Optional[str] = Header(default=None)):
     verify_action_key(authorization)
 
-    try:
+    
         positions = get_trading_client().get_all_positions()
         return [
             {
