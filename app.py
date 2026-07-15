@@ -9,7 +9,8 @@ from alpaca.trading.requests import (
     StopLimitOrderRequest,
     StopOrderRequest,
 )
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, HTTPException, Security
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -17,10 +18,12 @@ app = FastAPI(
     title="Catalyst IQ Paper Trading API",
     version="1.0.0",
 )
+security = HTTPBearer()
 
-
-def verify_action_key(authorization: Optional[str]) -> None:
-    expected_key = os.getenv("ACTION_API_KEY")
+def verify_action_key(
+    credentials: HTTPAuthorizationCredentials,
+) -> None:
+    expected_key = os.getenv("ACTION_API_KEY", "").strip()
 
     if not expected_key:
         raise HTTPException(
@@ -28,9 +31,11 @@ def verify_action_key(authorization: Optional[str]) -> None:
             detail="ACTION_API_KEY is not configured.",
         )
 
-    if authorization != f"Bearer {expected_key}":
-        raise HTTPException(status_code=401, detail="Unauthorized.")
-
+    if credentials.credentials != expected_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized.",
+        )
 
 def get_trading_client() -> TradingClient:
     api_key = os.getenv("ALPACA_API_KEY")
@@ -101,8 +106,10 @@ def health():
 
 
 @app.get("/paper/account")
-def get_paper_account(authorization: Optional[str] = Header(default=None)):
-    verify_action_key(authorization)
+def get_paper_account(
+    credentials: HTTPAuthorizationCredentials = Security(security),
+):
+    verify_action_key(credentials)
 
     try:
         account = get_trading_client().get_account()
@@ -148,9 +155,9 @@ def get_paper_positions(authorization: Optional[str] = Header(default=None)):
 
 @app.get("/paper/orders")
 def get_paper_orders(
-    authorization: Optional[str] = Header(default=None),
+    credentials: HTTPAuthorizationCredentials = Security(security),
 ):
-    verify_action_key(authorization)
+    verify_action_key(credentials)
 
     try:
         orders = get_trading_client().get_orders()
@@ -162,9 +169,9 @@ def get_paper_orders(
 @app.post("/paper/orders")
 def submit_paper_order(
     order: NewOrder,
-    authorization: Optional[str] = Header(default=None),
+    credentials: HTTPAuthorizationCredentials = Security(security),
 ):
-    verify_action_key(authorization)
+    verify_action_key(credentials)
 
     common = {
         "symbol": order.symbol.upper(),
@@ -208,11 +215,15 @@ def submit_paper_order(
 
 
 @app.get("/paper/orders/{order_id}")
+@app.get("/paper/orders/{order_id}")
 def get_paper_order(
     order_id: str,
-    authorization: Optional[str] = Header(default=None),
+    credentials: HTTPAuthorizationCredentials = Security(security),
 ):
-    verify_action_key(authorization)
+    verify_action_key(credentials)
+
+    try:
+        order = get_trading_client().get_order_by_id(order_id)
 
     try:
         order = get_trading_client().get_order_by_id(order_id)
@@ -221,15 +232,25 @@ def get_paper_order(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+
+@app.get("/paper/orders/{order_id}")
+def get_paper_order(
+    order_id: str,
+    credentials: HTTPAuthorizationCredentials = Security(security),
+):
 @app.delete("/paper/orders/{order_id}")
 def cancel_paper_order(
     order_id: str,
-    authorization: Optional[str] = Header(default=None),
+    credentials: HTTPAuthorizationCredentials = Security(security),
 ):
-    verify_action_key(authorization)
+    verify_action_key(credentials)
 
     try:
         get_trading_client().cancel_order_by_id(order_id)
-        return {"status": "cancellation_requested", "order_id": order_id}
+        return {
+            "status": "cancellation_requested",
+            "order_id": order_id,
+        }
     except Exception as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+   
