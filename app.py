@@ -217,7 +217,6 @@ def submit_paper_order(
 
 
 @app.get("/paper/orders/{order_id}")
-@app.get("/paper/orders/{order_id}")
 def get_paper_order(
     order_id: str,
     credentials: HTTPAuthorizationCredentials = Security(security),
@@ -226,20 +225,11 @@ def get_paper_order(
 
     try:
         order = get_trading_client().get_order_by_id(order_id)
-
-    try:
-        order = get_trading_client().get_order_by_id(order_id)
         return order.model_dump(mode="json")
     except Exception as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-
-@app.get("/paper/orders/{order_id}")
-def get_paper_order(
-    order_id: str,
-    credentials: HTTPAuthorizationCredentials = Security(security),
-):
 @app.delete("/paper/orders/{order_id}")
 def cancel_paper_order(
     order_id: str,
@@ -255,4 +245,3 @@ def cancel_paper_order(
         }
     except Exception as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-   
