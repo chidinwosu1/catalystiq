@@ -129,10 +129,12 @@ def get_paper_account(
 
 
 @app.get("/paper/positions")
-def get_paper_positions(authorization: Optional[str] = Header(default=None)):
-    verify_action_key(authorization)
+def get_paper_positions(
+    credentials: HTTPAuthorizationCredentials = Security(security),
+):
+    verify_action_key(credentials)
 
-    
+    try:
         positions = get_trading_client().get_all_positions()
         return [
             {
