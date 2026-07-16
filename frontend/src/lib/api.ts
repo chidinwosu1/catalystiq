@@ -50,6 +50,74 @@ export interface DataQualityReport {
   bar_count: number;
 }
 
+export interface FundamentalsSnapshot {
+  symbol: string;
+  long_name: string | null;
+  sector: string | null;
+  industry: string | null;
+  market_cap: number | null;
+  trailing_pe: number | null;
+  forward_pe: number | null;
+  peg_ratio: number | null;
+  ev_to_ebitda: number | null;
+  revenue_growth: number | null;
+  earnings_growth: number | null;
+  gross_margins: number | null;
+  operating_margins: number | null;
+  return_on_equity: number | null;
+  free_cashflow: number | null;
+  total_debt: number | null;
+  total_cash: number | null;
+  as_of: string;
+}
+
+export interface AccountInfo {
+  status: string;
+  currency: string;
+  cash: string;
+  buying_power: string;
+  portfolio_value: string;
+  equity: string;
+  last_equity: string;
+  trading_blocked: boolean;
+  account_blocked: boolean;
+  pattern_day_trader: boolean;
+}
+
+export interface Position {
+  symbol: string;
+  side: string;
+  qty: string;
+  avg_entry_price: string;
+  market_value: string;
+  cost_basis: string;
+  unrealized_pl: string;
+  unrealized_plpc: string;
+  current_price: string;
+  change_today: string;
+}
+
+export type OrderSide = "buy" | "sell";
+export type OrderType = "market" | "limit" | "stop" | "stop_limit" | "trailing_stop";
+export type TimeInForce = "day" | "gtc" | "ioc" | "fok";
+
+export interface NewOrder {
+  symbol: string;
+  side: OrderSide;
+  type: OrderType;
+  time_in_force?: TimeInForce;
+  qty?: number;
+  notional?: number;
+  limit_price?: number;
+  stop_price?: number;
+  trail_percent?: number;
+  trail_price?: number;
+  extended_hours?: boolean;
+  client_order_id?: string;
+  take_profit_price?: number;
+  stop_loss_price?: number;
+}
+
 export class ApiError extends Error {
   status: number;
 
@@ -100,4 +168,32 @@ export function ingestPriceHistory(symbol: string, days = 365 * 5): Promise<Data
   return request(`/market-data/ingest/${encodeURIComponent(symbol)}?days=${days}`, {
     method: "POST",
   });
+}
+
+export function getFundamentals(symbol: string): Promise<FundamentalsSnapshot> {
+  return request(`/market-data/fundamentals/${encodeURIComponent(symbol)}`);
+}
+
+export function getAccount(): Promise<AccountInfo> {
+  return request("/paper/account");
+}
+
+export function getPositions(): Promise<Position[]> {
+  return request("/paper/positions");
+}
+
+export function getOrders(): Promise<Record<string, unknown>[]> {
+  return request("/paper/orders");
+}
+
+export function submitOrder(order: NewOrder): Promise<Record<string, unknown>> {
+  return request("/paper/orders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(order),
+  });
+}
+
+export function cancelOrder(orderId: string): Promise<Record<string, unknown>> {
+  return request(`/paper/orders/${encodeURIComponent(orderId)}`, { method: "DELETE" });
 }

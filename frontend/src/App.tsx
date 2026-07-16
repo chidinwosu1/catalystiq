@@ -1,48 +1,44 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Header from "./components/Header";
 import Disclaimer from "./components/Disclaimer";
-import AnalysisCard from "./components/AnalysisCard";
-import AnalysisCardSkeleton from "./components/AnalysisCardSkeleton";
-import LiveLookupPanel from "./components/LiveLookupPanel";
-import { mockReports } from "./mockData";
+import TradeTicketPage from "./pages/TradeTicketPage";
+import PortfolioPage from "./pages/PortfolioPage";
+import MarketIntelligencePage from "./pages/MarketIntelligencePage";
+import AnalysisJournalPage from "./pages/AnalysisJournalPage";
+import type { PageId } from "./types/nav";
 
 function App() {
-  const [loading, setLoading] = useState(true);
-  const [liveSymbol, setLiveSymbol] = useState<string | null>(null);
+  const [activePage, setActivePage] = useState<PageId>("markets");
+  const [tradeSymbol, setTradeSymbol] = useState("");
+  const [analysisSymbol, setAnalysisSymbol] = useState("");
 
-  useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 500);
-    return () => clearTimeout(timer);
-  }, []);
+  function goToTrade(symbol: string) {
+    setTradeSymbol(symbol);
+    setActivePage("trade");
+  }
+
+  function goToAnalysis(symbol: string) {
+    setAnalysisSymbol(symbol);
+    setActivePage("analysis");
+  }
 
   return (
     <div className="flex min-h-screen flex-col">
-      <Header onSearch={setLiveSymbol} />
+      <Header activePage={activePage} onNavigate={setActivePage} onSearch={goToTrade} />
 
       <main className="mx-auto w-full max-w-7xl flex-1 px-6 py-8">
-        {liveSymbol && (
-          <LiveLookupPanel
-            key={liveSymbol}
-            symbol={liveSymbol}
-            onClose={() => setLiveSymbol(null)}
-          />
+        {activePage === "trade" && (
+          <TradeTicketPage initialSymbol={tradeSymbol} onViewAnalysis={goToAnalysis} />
         )}
-
-        <div className="mb-6 flex items-end justify-between">
-          <div>
-            <h1 className="text-xl font-semibold text-ink-primary">Watchlist</h1>
-            <p className="mt-1 text-sm text-ink-secondary">
-              Demo reports — the analytical and behavioral engines aren't wired up yet, so
-              these are hand-authored samples of the Phase 7 report layout.
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-          {loading
-            ? Array.from({ length: 3 }, (_, i) => <AnalysisCardSkeleton key={i} />)
-            : mockReports.map((report) => <AnalysisCard key={report.ticker} report={report} />)}
-        </div>
+        {activePage === "portfolio" && (
+          <PortfolioPage onTrade={goToTrade} onViewAnalysis={goToAnalysis} />
+        )}
+        {activePage === "markets" && (
+          <MarketIntelligencePage onTrade={goToTrade} onViewAnalysis={goToAnalysis} />
+        )}
+        {activePage === "analysis" && (
+          <AnalysisJournalPage initialSymbol={analysisSymbol} onTrade={goToTrade} />
+        )}
       </main>
 
       <footer className="border-t border-border">

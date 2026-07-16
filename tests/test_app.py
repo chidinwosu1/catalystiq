@@ -13,6 +13,29 @@ def test_root_and_health_need_no_auth(client):
     assert client.get("/health").status_code == 200
 
 
+def test_broker_construction_failure_returns_clean_502_with_cors(client, monkeypatch):
+    """Regression test: get_broker_provider() runs as a FastAPI dependency, so
+    a BrokerError raised there (e.g. missing credentials) used to become an
+    unhandled 500 that skipped CORSMiddleware - the browser reported it as a
+    CORS failure instead of the real "not configured" error. The
+    BrokerError exception handler in main.py fixes this.
+    """
+    from catalystiq.config import get_settings
+
+    monkeypatch.setenv("ALPACA_API_KEY", "")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "")
+    get_settings.cache_clear()
+    try:
+        response = client.get(
+            "/paper/account", headers={"Origin": "http://localhost:5173"}
+        )
+        assert response.status_code == 502
+        assert "not configured" in response.json()["detail"]
+        assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
+    finally:
+        get_settings.cache_clear()
+
+
 def test_paper_account_requires_auth():
     from fastapi.testclient import TestClient
 
@@ -33,6 +56,7 @@ def test_paper_account_uses_overridden_broker(client):
                 buying_power="200",
                 portfolio_value="150",
                 equity="150",
+                last_equity="145",
                 trading_blocked=False,
                 account_blocked=False,
                 pattern_day_trader=False,

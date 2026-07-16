@@ -94,6 +94,7 @@ class AlpacaPaperBroker(BrokerProvider):
             buying_power=str(account.buying_power),
             portfolio_value=str(account.portfolio_value),
             equity=str(account.equity),
+            last_equity=str(account.last_equity),
             trading_blocked=account.trading_blocked,
             account_blocked=account.account_blocked,
             pattern_day_trader=account.pattern_day_trader,
@@ -129,12 +130,35 @@ class AlpacaPaperBroker(BrokerProvider):
 
         return [order.model_dump(mode="json") for order in orders]
 
+    @staticmethod
+    def _bracket_kwargs(order: NewOrder) -> dict:
+        """Maps take_profit_price/stop_loss_price to Alpaca's order_class + leg
+        requests (verified against alpaca-py's real request models: every
+        order request type accepts order_class/take_profit/stop_loss, and
+        TakeProfitRequest/StopLossRequest take limit_price/stop_price)."""
+        from alpaca.trading.enums import OrderClass
+        from alpaca.trading.requests import StopLossRequest, TakeProfitRequest
+
+        has_tp = order.take_profit_price is not None
+        has_sl = order.stop_loss_price is not None
+        if not has_tp and not has_sl:
+            return {}
+
+        kwargs: dict = {}
+        if has_tp:
+            kwargs["take_profit"] = TakeProfitRequest(limit_price=order.take_profit_price)
+        if has_sl:
+            kwargs["stop_loss"] = StopLossRequest(stop_price=order.stop_loss_price)
+        kwargs["order_class"] = OrderClass.BRACKET if (has_tp and has_sl) else OrderClass.OTO
+        return kwargs
+
     def submit_order(self, order: NewOrder) -> dict:
         from alpaca.trading.requests import (
             LimitOrderRequest,
             MarketOrderRequest,
             StopLimitOrderRequest,
             StopOrderRequest,
+            TrailingStopOrderRequest,
         )
 
         common = {
@@ -142,6 +166,7 @@ class AlpacaPaperBroker(BrokerProvider):
             "side": self._order_side(order.side),
             "time_in_force": self._time_in_force(order.time_in_force),
             "extended_hours": order.extended_hours,
+            **self._bracket_kwargs(order),
         }
 
         if order.qty is not None:
@@ -158,11 +183,17 @@ class AlpacaPaperBroker(BrokerProvider):
             request = LimitOrderRequest(**common, limit_price=order.limit_price)
         elif order.type == "stop":
             request = StopOrderRequest(**common, stop_price=order.stop_price)
-        else:
+        elif order.type == "stop_limit":
             request = StopLimitOrderRequest(
                 **common,
                 stop_price=order.stop_price,
                 limit_price=order.limit_price,
+            )
+        else:
+            request = TrailingStopOrderRequest(
+                **common,
+                trail_percent=order.trail_percent,
+                trail_price=order.trail_price,
             )
 
         try:
@@ -330,6 +361,16 @@ class WebullBroker(BrokerProvider):
             raise BrokerError(
                 f"Webull doesn't support time_in_force={order.time_in_force!r} "
                 "(only day/gtc/ioc)."
+            )
+        if order.type not in self._ORDER_TYPE:
+            raise BrokerError(
+                f"order_type={order.type!r} isn't mapped for Webull yet "
+                "(only market/limit/stop/stop_limit)."
+            )
+        if order.take_profit_price is not None or order.stop_loss_price is not None:
+            raise BrokerError(
+                "Bracket/take-profit/stop-loss legs aren't supported for Webull orders "
+                "in this integration - Webull's combo/bracket order shape isn't verified."
             )
 
         webull_order = {

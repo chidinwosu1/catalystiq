@@ -38,13 +38,33 @@ This codebase currently implements **Phase 1 — Data plumbing**:
   OHLCV, runs the validation layer, and upserts cleaned bars into
   `price_history`, returning the resulting data-quality report.
 
-There's also an initial slice of **Phase 7 — Frontend** (`frontend/`): a
-React + Vite + Tailwind dashboard. The watchlist grid shows hand-authored
-demo `AnalysisCard`s (rating/probability/confidence/behavioral signal) built
-to the spec's §10 component contract — clearly labeled as demo data. The
-header's ticker search is wired to the *real* backend: it calls the quote
-and ingest endpoints and shows actual price + data-quality results, with no
-fabricated rating, since the scoring/behavioral engines don't exist yet.
+There's also a working slice of **Phase 7 — Frontend** (`frontend/`): a
+React + Vite + Tailwind app with four tabs:
+
+- **Trade** — a real trade ticket wired to the broker (§1.1 Execution
+  Zone): live quote/company name, all five order types (market, limit,
+  stop, stop-limit, trailing stop), real bracket/OTO take-profit and
+  stop-loss legs, review → submit against `/paper/orders`.
+- **Portfolio** — real account/positions data from `/paper/account` and
+  `/paper/positions` (total value, cash, buying power, today's/total P/L,
+  per-position table with Buy More/Sell/Analysis actions). The "Portfolio
+  Intelligence" section (sector exposure, beta, correlation) is clearly
+  labeled demo data - it needs analytics this build doesn't compute yet.
+- **Markets** — a full Market Intelligence dashboard (index overview,
+  sector rotation, catalysts, daily watchlist), entirely demo data since
+  the Market Environment/Sector/News modules aren't built, and labeled as
+  such throughout.
+- **Analysis** — real live price for a searched ticker; the setup
+  indicators, Catalyst IQ scores, and rating are demo data (reusing the
+  `AnalysisCard` building blocks) pending the analytical engine. Below
+  that, a real **trade journal** (entry/exit, thesis, exit reason, rules
+  followed) and **performance analytics** (win rate, profit factor,
+  best/worst trade, performance by trade type) computed live from
+  whatever you log - not persisted to the backend yet, so it resets on
+  reload.
+
+Every demo-data section is visibly marked (a small "Demo data" badge) so
+it's never confused with real output.
 
 Everything past this (indicator/regime/scoring modules, the FBA engine, LLM
 synthesis, the rest of the frontend, backtesting) is **not yet built** — see

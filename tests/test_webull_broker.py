@@ -188,6 +188,24 @@ def test_submit_order_fok_not_supported():
         broker.submit_order(order)
 
 
+def test_submit_order_trailing_stop_not_supported():
+    broker = make_broker()
+    order = NewOrder(symbol="aapl", side="buy", type="trailing_stop", qty=1, trail_percent=5)
+
+    with pytest.raises(BrokerError, match="isn't mapped"):
+        broker.submit_order(order)
+
+
+def test_submit_order_bracket_legs_not_supported():
+    broker = make_broker()
+    order = NewOrder(
+        symbol="aapl", side="buy", type="market", qty=1, take_profit_price=220
+    )
+
+    with pytest.raises(BrokerError, match="Bracket"):
+        broker.submit_order(order)
+
+
 def test_get_order_not_found_raises_order_not_found_error():
     trade_client = MagicMock()
     trade_client.order_v3.get_order_detail.return_value = fake_response(

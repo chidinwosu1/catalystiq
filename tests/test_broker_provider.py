@@ -32,6 +32,7 @@ def test_get_account_maps_fields(broker):
         buying_power="2000.00",
         portfolio_value="1500.00",
         equity="1500.00",
+        last_equity="1480.00",
         trading_blocked=False,
         account_blocked=False,
         pattern_day_trader=False,
@@ -121,3 +122,78 @@ def test_new_order_requires_qty_xor_notional():
 def test_new_order_limit_requires_limit_price():
     with pytest.raises(ValueError):
         NewOrder(symbol="aapl", side="buy", type="limit", qty=5)
+
+
+def test_new_order_trailing_stop_requires_exactly_one_trail_field():
+    with pytest.raises(ValueError):
+        NewOrder(symbol="aapl", side="buy", type="trailing_stop", qty=1)
+    with pytest.raises(ValueError):
+        NewOrder(
+            symbol="aapl",
+            side="buy",
+            type="trailing_stop",
+            qty=1,
+            trail_percent=5,
+            trail_price=2,
+        )
+    # exactly one is fine
+    NewOrder(symbol="aapl", side="buy", type="trailing_stop", qty=1, trail_percent=5)
+
+
+def test_new_order_trail_fields_only_valid_for_trailing_stop():
+    with pytest.raises(ValueError):
+        NewOrder(symbol="aapl", side="buy", type="market", qty=1, trail_percent=5)
+
+
+def test_submit_order_trailing_stop_builds_correct_request(broker):
+    fake_result = MagicMock()
+    fake_result.model_dump.return_value = {"id": "order-2", "status": "accepted"}
+    broker._client.submit_order.return_value = fake_result
+
+    order = NewOrder(
+        symbol="tsla", side="sell", type="trailing_stop", qty=3, trail_percent=4.5
+    )
+    broker.submit_order(order)
+
+    request = broker._client.submit_order.call_args.kwargs["order_data"]
+    assert request.trail_percent == 4.5
+    assert request.trail_price is None
+
+
+def test_submit_order_with_take_profit_and_stop_loss_builds_bracket(broker):
+    from alpaca.trading.enums import OrderClass
+
+    fake_result = MagicMock()
+    fake_result.model_dump.return_value = {"id": "order-3", "status": "accepted"}
+    broker._client.submit_order.return_value = fake_result
+
+    order = NewOrder(
+        symbol="nvda",
+        side="buy",
+        type="market",
+        qty=10,
+        take_profit_price=220,
+        stop_loss_price=190,
+    )
+    broker.submit_order(order)
+
+    request = broker._client.submit_order.call_args.kwargs["order_data"]
+    assert request.order_class == OrderClass.BRACKET
+    assert request.take_profit.limit_price == 220
+    assert request.stop_loss.stop_price == 190
+
+
+def test_submit_order_with_only_stop_loss_builds_oto(broker):
+    from alpaca.trading.enums import OrderClass
+
+    fake_result = MagicMock()
+    fake_result.model_dump.return_value = {"id": "order-4", "status": "accepted"}
+    broker._client.submit_order.return_value = fake_result
+
+    order = NewOrder(symbol="nvda", side="buy", type="market", qty=10, stop_loss_price=190)
+    broker.submit_order(order)
+
+    request = broker._client.submit_order.call_args.kwargs["order_data"]
+    assert request.order_class == OrderClass.OTO
+    assert request.stop_loss.stop_price == 190
+    assert request.take_profit is None

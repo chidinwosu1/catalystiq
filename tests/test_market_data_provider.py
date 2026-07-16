@@ -83,6 +83,7 @@ def test_get_ohlcv_wraps_exceptions(provider, monkeypatch):
 def test_get_fundamentals_maps_known_fields(provider, monkeypatch):
     fake_ticker = MagicMock()
     fake_ticker.info = {
+        "longName": "Apple Inc.",
         "sector": "Technology",
         "industry": "Consumer Electronics",
         "marketCap": 3_000_000_000_000,
@@ -94,10 +95,21 @@ def test_get_fundamentals_maps_known_fields(provider, monkeypatch):
     snap = provider.get_fundamentals("aapl")
 
     assert snap.symbol == "AAPL"
+    assert snap.long_name == "Apple Inc."
     assert snap.sector == "Technology"
     assert snap.trailing_pe == 30.5
     assert snap.return_on_equity == 1.5
     assert snap.forward_pe is None
+
+
+def test_get_fundamentals_falls_back_to_short_name(provider, monkeypatch):
+    fake_ticker = MagicMock()
+    fake_ticker.info = {"shortName": "Apple"}
+    monkeypatch.setattr(provider, "_ticker", lambda symbol: fake_ticker)
+
+    snap = provider.get_fundamentals("aapl")
+
+    assert snap.long_name == "Apple"
 
 
 def test_get_news_maps_content_items(provider, monkeypatch):

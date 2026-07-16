@@ -30,6 +30,7 @@ class Quote(BaseModel):
 
 class FundamentalsSnapshot(BaseModel):
     symbol: str
+    long_name: str | None = None
     sector: str | None = None
     industry: str | None = None
     market_cap: float | None = None

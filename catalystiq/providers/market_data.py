@@ -122,6 +122,7 @@ class YahooFinanceProvider(MarketDataProvider):
 
         return FundamentalsSnapshot(
             symbol=symbol.upper(),
+            long_name=info.get("longName") or info.get("shortName"),
             sector=info.get("sector"),
             industry=info.get("industry"),
             market_cap=info.get("marketCap"),
