@@ -10,9 +10,22 @@ class Settings(BaseSettings):
     # Auth for the paper-trading action endpoints.
     action_api_key: str = ""
 
-    # Broker (paper trading) credentials.
+    # Which BrokerProvider to use: "alpaca" or "webull".
+    broker_provider: str = "alpaca"
+
+    # Alpaca paper-trading credentials.
     alpaca_api_key: str = ""
     alpaca_secret_key: str = ""
+
+    # Webull OpenAPI credentials (https://developer.webull.com/apis/docs/trade-api/getting-started).
+    # region_id is e.g. "us" or "hk"; api_endpoint defaults to Webull's own
+    # resolver but can be pointed at the sandbox host explicitly.
+    webull_app_key: str = ""
+    webull_app_secret: str = ""
+    webull_account_id: str = ""
+    webull_region_id: str = "us"
+    webull_api_endpoint: str = ""
+    webull_token_dir: str = ""
 
     # Market data provider.
     market_data_provider: str = "yahoo"

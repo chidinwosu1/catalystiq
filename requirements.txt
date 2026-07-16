@@ -1,6 +1,7 @@
 fastapi
 uvicorn[standard]
 alpaca-py
+webull-openapi-python-sdk
 pydantic
 pydantic-settings
 sqlalchemy
