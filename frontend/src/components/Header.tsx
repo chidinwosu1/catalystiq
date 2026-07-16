@@ -1,7 +1,21 @@
+import { useState } from "react";
 import { Search } from "lucide-react";
 import Logo from "./Logo";
 
-export default function Header() {
+interface HeaderProps {
+  onSearch: (symbol: string) => void;
+}
+
+export default function Header({ onSearch }: HeaderProps) {
+  const [value, setValue] = useState("");
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== "Enter") return;
+    const symbol = value.trim().toUpperCase();
+    if (!symbol) return;
+    onSearch(symbol);
+  }
+
   return (
     <header className="border-b border-border bg-page/80 backdrop-blur">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-4">
@@ -23,7 +37,10 @@ export default function Header() {
           <Search size={15} />
           <input
             type="text"
-            placeholder="Search ticker…"
+            placeholder="Search ticker, press Enter…"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={handleKeyDown}
             className="w-full bg-transparent text-ink-primary placeholder:text-ink-muted focus:outline-none"
           />
         </label>

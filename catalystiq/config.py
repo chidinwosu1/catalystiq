@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     price_gap_zscore_threshold: float = 3.0
     price_history_lookback_years: int = 5
 
+    # Local dev: origin(s) allowed to call the API directly from a browser
+    # (the Vite dev server). Comma-separated.
+    cors_allow_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+
 
 @lru_cache
 def get_settings() -> Settings:

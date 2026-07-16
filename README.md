@@ -33,9 +33,17 @@ This codebase currently implements **Phase 1 — Data plumbing**:
   OHLCV, runs the validation layer, and upserts cleaned bars into
   `price_history`, returning the resulting data-quality report.
 
+There's also an initial slice of **Phase 7 — Frontend** (`frontend/`): a
+React + Vite + Tailwind dashboard. The watchlist grid shows hand-authored
+demo `AnalysisCard`s (rating/probability/confidence/behavioral signal) built
+to the spec's §10 component contract — clearly labeled as demo data. The
+header's ticker search is wired to the *real* backend: it calls the quote
+and ingest endpoints and shows actual price + data-quality results, with no
+fabricated rating, since the scoring/behavioral engines don't exist yet.
+
 Everything past this (indicator/regime/scoring modules, the FBA engine, LLM
-synthesis, the React frontend, backtesting) is **not yet built** — see the
-build spec's phase list for what's next.
+synthesis, the rest of the frontend, backtesting) is **not yet built** — see
+the build spec's phase list for what's next.
 
 ## Project layout
 
@@ -78,6 +86,7 @@ Environment variables (`catalystiq/config.py`):
 | `MARKET_DATA_PROVIDER` | Which `MarketDataProvider` to use | `yahoo` |
 | `PRICE_GAP_ZSCORE_THRESHOLD` | Abnormal-gap flag threshold | `3.0` |
 | `PRICE_HISTORY_LOOKBACK_YEARS` | Target history depth for the thin-history confidence flag | `5` |
+| `CORS_ALLOW_ORIGINS` | Comma-separated origins allowed to call the API from a browser | `http://localhost:5173,http://127.0.0.1:5173` |
 
 Apply migrations (creates the tables in `DATABASE_URL`):
 
@@ -96,6 +105,20 @@ Run tests (fully offline — provider network calls are mocked):
 ```bash
 python -m pytest
 ```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+cp .env.example .env   # points the frontend at the backend + dev API key
+npm run dev
+```
+
+`frontend/.env`'s `VITE_ACTION_API_KEY` must match the backend's
+`ACTION_API_KEY` for the live-lookup search to authenticate. See the
+warning in `frontend/src/lib/api.ts` — this is a dev-only auth shortcut,
+not a pattern to ship.
 
 ## API surface (Phase 1)
 

@@ -3,10 +3,12 @@ import Header from "./components/Header";
 import Disclaimer from "./components/Disclaimer";
 import AnalysisCard from "./components/AnalysisCard";
 import AnalysisCardSkeleton from "./components/AnalysisCardSkeleton";
+import LiveLookupPanel from "./components/LiveLookupPanel";
 import { mockReports } from "./mockData";
 
 function App() {
   const [loading, setLoading] = useState(true);
+  const [liveSymbol, setLiveSymbol] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => setLoading(false), 500);
@@ -15,9 +17,17 @@ function App() {
 
   return (
     <div className="flex min-h-screen flex-col">
-      <Header />
+      <Header onSearch={setLiveSymbol} />
 
       <main className="mx-auto w-full max-w-7xl flex-1 px-6 py-8">
+        {liveSymbol && (
+          <LiveLookupPanel
+            key={liveSymbol}
+            symbol={liveSymbol}
+            onClose={() => setLiveSymbol(null)}
+          />
+        )}
+
         <div className="mb-6 flex items-end justify-between">
           <div>
             <h1 className="text-xl font-semibold text-ink-primary">Watchlist</h1>
