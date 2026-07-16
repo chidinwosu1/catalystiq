@@ -291,3 +291,4 @@ pandas_market_calendars
 # dev / test
 pytest
 httpx
+
