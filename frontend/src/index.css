@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* Brand */
+  --color-brand-blue: #3987e5;
+  --color-brand-blue-dark: #1c5cab;
+
+  /* Surfaces */
+  --color-page: #090c12;
+  --color-surface: #12161f;
+  --color-surface-2: #1a2130;
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-strong: rgba(255, 255, 255, 0.16);
+
+  /* Ink */
+  --color-ink-primary: #f4f6f9;
+  --color-ink-secondary: #a3adc0;
+  --color-ink-muted: #6b7383;
+
+  /* Status (fixed roles - validated: catalystiq/docs or dataviz skill) */
+  --color-status-good: #0ca30c;
+  --color-status-good-soft: rgba(12, 163, 12, 0.16);
+  --color-status-warning: #fab219;
+  --color-status-warning-soft: rgba(250, 178, 25, 0.16);
+  --color-status-critical: #d03b3b;
+  --color-status-critical-soft: rgba(208, 59, 59, 0.16);
+  --color-status-neutral: #7b8494;
+  --color-status-neutral-soft: rgba(123, 132, 148, 0.16);
+}
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: var(--color-page);
+  color: var(--color-ink-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+}

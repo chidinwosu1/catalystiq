@@ -1,0 +1,127 @@
+import datetime as dt
+
+from catalystiq.auth import verify_action_key
+from catalystiq.db import models
+from catalystiq.main import app
+from catalystiq.providers.broker import get_broker_provider
+from catalystiq.providers.market_data import get_market_data_provider
+from catalystiq.schemas.market_data import FundamentalsSnapshot, NewsItem, OHLCVBar, Quote
+
+
+def test_root_and_health_need_no_auth(client):
+    assert client.get("/").status_code == 200
+    assert client.get("/health").status_code == 200
+
+
+def test_paper_account_requires_auth():
+    from fastapi.testclient import TestClient
+
+    with TestClient(app) as unauth_client:
+        r = unauth_client.get("/paper/account")
+        assert r.status_code in (401, 403)
+
+
+def test_paper_account_uses_overridden_broker(client):
+    class FakeBroker:
+        def get_account(self):
+            from catalystiq.schemas.broker import AccountInfo
+
+            return AccountInfo(
+                status="ACTIVE",
+                currency="USD",
+                cash="100",
+                buying_power="200",
+                portfolio_value="150",
+                equity="150",
+                trading_blocked=False,
+                account_blocked=False,
+                pattern_day_trader=False,
+            )
+
+    app.dependency_overrides[get_broker_provider] = lambda: FakeBroker()
+    try:
+        r = client.get("/paper/account")
+        assert r.status_code == 200
+        assert r.json()["status"] == "ACTIVE"
+    finally:
+        del app.dependency_overrides[get_broker_provider]
+
+
+def _bar(date, close):
+    return OHLCVBar(date=date, open=close, high=close + 0.5, low=close - 0.5, close=close, volume=1_000_000)
+
+
+def test_ingest_price_history_validates_and_persists(client):
+    days = []
+    d = dt.date(2024, 1, 2)
+    while len(days) < 10:
+        if d.weekday() < 5:
+            days.append(d)
+        d += dt.timedelta(days=1)
+    bars = [_bar(day, 100 + i * 0.1) for i, day in enumerate(days)]
+
+    class FakeProvider:
+        def get_ohlcv(self, symbol, start, end=None, interval="1d"):
+            return bars
+
+        def get_quote(self, symbol):
+            return Quote(
+                symbol=symbol.upper(),
+                price=bars[-1].close,
+                previous_close=bars[-1].close,
+                as_of=dt.datetime.now(dt.timezone.utc),
+            )
+
+        def get_fundamentals(self, symbol):
+            raise NotImplementedError
+
+        def get_news(self, symbol, limit=10):
+            raise NotImplementedError
+
+    app.dependency_overrides[get_market_data_provider] = lambda: FakeProvider()
+    try:
+        r = client.post("/market-data/ingest/TEST", params={"days": 30})
+        assert r.status_code == 200
+        report = r.json()
+        assert report["symbol"] == "TEST"
+        assert report["bar_count"] == len(bars)
+    finally:
+        del app.dependency_overrides[get_market_data_provider]
+
+
+def test_ingest_price_history_is_idempotent_on_rerun(client, test_db_session):
+    days = []
+    d = dt.date(2024, 1, 2)
+    while len(days) < 5:
+        if d.weekday() < 5:
+            days.append(d)
+        d += dt.timedelta(days=1)
+    bars = [_bar(day, 100) for day in days]
+
+    class FakeProvider:
+        def get_ohlcv(self, symbol, start, end=None, interval="1d"):
+            return bars
+
+        def get_quote(self, symbol):
+            return Quote(
+                symbol=symbol.upper(), price=100, previous_close=100, as_of=dt.datetime.now(dt.timezone.utc)
+            )
+
+        def get_fundamentals(self, symbol):
+            raise NotImplementedError
+
+        def get_news(self, symbol, limit=10):
+            raise NotImplementedError
+
+    app.dependency_overrides[get_market_data_provider] = lambda: FakeProvider()
+    try:
+        client.post("/market-data/ingest/DUP", params={"days": 30})
+        client.post("/market-data/ingest/DUP", params={"days": 30})
+
+        ticker = test_db_session.query(models.Ticker).filter_by(symbol="DUP").one()
+        row_count = (
+            test_db_session.query(models.PriceHistory).filter_by(ticker_id=ticker.id).count()
+        )
+        assert row_count == len(bars)
+    finally:
+        del app.dependency_overrides[get_market_data_provider]

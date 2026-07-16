@@ -2,3 +2,14 @@ fastapi
 uvicorn[standard]
 alpaca-py
 pydantic
+pydantic-settings
+sqlalchemy
+alembic
+psycopg2-binary
+yfinance
+pandas
+pandas_market_calendars
+
+# dev / test
+pytest
+httpx
