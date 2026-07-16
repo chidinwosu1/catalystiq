@@ -1,0 +1,29 @@
+<svg width="200" height="180" viewBox="0 0 200 180" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="s" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f1f3f7"/>
+      <stop offset="35%" stop-color="#b7bec9"/>
+      <stop offset="62%" stop-color="#7d8494"/>
+      <stop offset="100%" stop-color="#d8dde4"/>
+    </linearGradient>
+    <linearGradient id="b" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#8ec0f7"/>
+      <stop offset="55%" stop-color="#3987e5"/>
+      <stop offset="100%" stop-color="#1c5cab"/>
+    </linearGradient>
+    <mask id="cmask">
+      <circle cx="92" cy="94" r="80" fill="white"/>
+      <circle cx="92" cy="94" r="48" fill="black"/>
+      <polygon points="92,94 182,26 182,162" fill="black"/>
+    </mask>
+    <mask id="qmask">
+      <circle cx="134" cy="104" r="54" fill="white"/>
+      <circle cx="134" cy="104" r="32" fill="black"/>
+    </mask>
+  </defs>
+  <rect width="200" height="180" fill="#090c12"/>
+  <circle cx="92" cy="94" r="80" fill="url(#s)" mask="url(#cmask)"/>
+  <circle cx="134" cy="104" r="54" fill="url(#s)" mask="url(#qmask)"/>
+  <polygon points="150,132 179,160 160,160 138,138" fill="url(#b)"/>
+  <rect x="98" y="42" width="17" height="108" fill="url(#b)"/>
+</svg>
