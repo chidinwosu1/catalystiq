@@ -50,6 +50,12 @@ class MarketDataError(RuntimeError):
 class YahooFinanceProvider(MarketDataProvider):
     """MarketDataProvider backed by Yahoo Finance via the `yfinance` package."""
 
+    # Bumped whenever this adapter's parsing/field-mapping logic changes -
+    # persisted on every Bronze ingestion run (catalystiq/pipelines/
+    # market_price_pipeline.py) so a Gold result can be traced back to
+    # exactly which version of this adapter produced its source data.
+    ADAPTER_VERSION = "1.0.0"
+
     def __init__(self) -> None:
         # Imported lazily so importing this module doesn't require yfinance
         # (and its heavy transitive deps) unless this provider is actually used.

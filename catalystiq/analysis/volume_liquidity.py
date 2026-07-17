@@ -14,24 +14,26 @@ import numpy as np
 import pandas as pd
 
 from catalystiq.analysis.common import bars_to_frame, history_days_available, insufficient, make_reading
+from catalystiq.analysis.config import DEFAULT_VOLUME_LIQUIDITY_CONFIG as _CFG
 from catalystiq.schemas.analysis import FeatureReading
 from catalystiq.schemas.market_data import OHLCVBar
 from catalystiq.schemas.volume_liquidity import VolumeLiquiditySnapshot
 
-# --- Configuration (documented, to be promoted to versioned config per §25) ---
-ADV_WINDOWS = (5, 20, 60, 200)
-RELATIVE_VOLUME_WINDOW = 20
-DOLLAR_VOLUME_MEDIAN_WINDOW = 20
-VOLUME_ZSCORE_WINDOW = 20
-UP_DOWN_VOLUME_WINDOW = 20
-CMF_PERIOD = 20
-MFI_PERIOD = 14
-TREND_SLOPE_WINDOW = 10
-DIVERGENCE_WINDOW = 20
+# --- Configuration - sourced from catalystiq/analysis/config.py
+# (VolumeLiquidityConfig): externalized, versioned, values unchanged. ---
+ADV_WINDOWS = _CFG.adv_windows
+RELATIVE_VOLUME_WINDOW = _CFG.relative_volume_window
+DOLLAR_VOLUME_MEDIAN_WINDOW = _CFG.dollar_volume_median_window
+VOLUME_ZSCORE_WINDOW = _CFG.volume_zscore_window
+UP_DOWN_VOLUME_WINDOW = _CFG.up_down_volume_window
+CMF_PERIOD = _CFG.cmf_period
+MFI_PERIOD = _CFG.mfi_period
+TREND_SLOPE_WINDOW = _CFG.trend_slope_window
+DIVERGENCE_WINDOW = _CFG.divergence_window
 
-LIQUIDITY_HIGH_THRESHOLD = 10_000_000.0
-LIQUIDITY_MODERATE_THRESHOLD = 1_000_000.0
-LIQUIDITY_LOW_THRESHOLD = 100_000.0
+LIQUIDITY_HIGH_THRESHOLD = _CFG.liquidity_high_threshold
+LIQUIDITY_MODERATE_THRESHOLD = _CFG.liquidity_moderate_threshold
+LIQUIDITY_LOW_THRESHOLD = _CFG.liquidity_low_threshold
 
 
 def _money_flow_multiplier(df: pd.DataFrame) -> pd.Series:

@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 
 from catalystiq.analysis.common import bars_to_frame, history_days_available, make_reading
+from catalystiq.analysis.config import DEFAULT_MARKET_STRUCTURE_CONFIG as _CFG
 from catalystiq.schemas.analysis import FeatureReading
 from catalystiq.schemas.market_data import OHLCVBar
 from catalystiq.schemas.market_structure import (
@@ -30,29 +31,30 @@ from catalystiq.schemas.market_structure import (
     SwingPoint,
 )
 
-# --- Configuration (documented, to be promoted to versioned config per §25) ---
-SWING_LEFT_BARS = 5
-SWING_RIGHT_BARS = 5
-SWING_MAX_STRENGTH_CHECK = 20
-SWING_POINTS_RETURNED = 10
+# --- Configuration - sourced from catalystiq/analysis/config.py
+# (MarketStructureConfig): externalized, versioned, values unchanged. ---
+SWING_LEFT_BARS = _CFG.swing_left_bars
+SWING_RIGHT_BARS = _CFG.swing_right_bars
+SWING_MAX_STRENGTH_CHECK = _CFG.swing_max_strength_check
+SWING_POINTS_RETURNED = _CFG.swing_points_returned
 
-LEVEL_CLUSTER_TOLERANCE_PCT = 1.0  # swing points within this % are the same level
-LEVEL_BROKEN_BUFFER_PCT = 0.5  # close beyond the level by this much marks it "broken"
+LEVEL_CLUSTER_TOLERANCE_PCT = _CFG.level_cluster_tolerance_pct
+LEVEL_BROKEN_BUFFER_PCT = _CFG.level_broken_buffer_pct
 
-BREAKOUT_MIN_PENETRATION_PCT = 0.5
-BREAKOUT_APPROACH_PCT = 2.0
-BREAKOUT_CONFIRM_RELATIVE_VOLUME = 1.2
-BREAKOUT_LOOKBACK_BARS = 10  # window to detect a recent breakout for retest/failed states
+BREAKOUT_MIN_PENETRATION_PCT = _CFG.breakout_min_penetration_pct
+BREAKOUT_APPROACH_PCT = _CFG.breakout_approach_pct
+BREAKOUT_CONFIRM_RELATIVE_VOLUME = _CFG.breakout_confirm_relative_volume
+BREAKOUT_LOOKBACK_BARS = _CFG.breakout_lookback_bars
 
-RANGE_BOUND_SWING_CHANGE_PCT = 1.5  # last-two-highs / last-two-lows pct change threshold
+RANGE_BOUND_SWING_CHANGE_PCT = _CFG.range_bound_swing_change_pct
 
-ADX_PERIOD = 14
-ADX_STRONG_TREND = 25
-ATR_PERIOD = 14
-ATR_VOL_WINDOW = 60  # lookback for the local (non-3y-gated) ATR-percentile used by regime
-VOL_EXPANSION_DELTA = 15  # percentile-point jump over VOL_EXPANSION_LOOKBACK_BARS
-VOL_EXPANSION_LOOKBACK_BARS = 10
-SIDEWAYS_VOL_SPLIT_PERCENTILE = 50
+ADX_PERIOD = _CFG.adx_period
+ADX_STRONG_TREND = _CFG.adx_strong_trend
+ATR_PERIOD = _CFG.atr_period
+ATR_VOL_WINDOW = _CFG.atr_vol_window
+VOL_EXPANSION_DELTA = _CFG.vol_expansion_delta
+VOL_EXPANSION_LOOKBACK_BARS = _CFG.vol_expansion_lookback_bars
+SIDEWAYS_VOL_SPLIT_PERCENTILE = _CFG.sideways_vol_split_percentile
 
 _CALC_VERSION = "1.0.0"
 

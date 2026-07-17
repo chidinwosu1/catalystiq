@@ -20,13 +20,16 @@ import datetime as dt
 import numpy as np
 import pandas as pd
 
+from catalystiq.analysis.config import DEFAULT_TECHNICAL_CONFIG as _CFG
 from catalystiq.schemas.analysis import IndicatorReading, TechnicalSnapshot
 from catalystiq.schemas.market_data import OHLCVBar
 
 # §6.1/§8: historical percentile/z-score require at least three years of
 # valid history. The field is named `percentile_5y` since five years is
 # the spec's preferred depth - three years is only the enforced minimum.
-_PERCENTILE_MIN_HISTORY_DAYS = 365 * 3
+# Sourced from catalystiq/analysis/config.py (TechnicalConfig) - externalized,
+# versioned, values unchanged from what shipped originally.
+_PERCENTILE_MIN_HISTORY_DAYS = _CFG.percentile_min_history_days
 
 
 def _bars_to_frame(bars: list[OHLCVBar]) -> pd.DataFrame:
@@ -190,6 +193,17 @@ def compute_technical_snapshot(symbol: str, bars: list[OHLCVBar]) -> TechnicalSn
     df = _bars_to_frame(bars)
     closes = df["close"]
 
+    sma_w1, sma_w2, sma_w3, sma_w4 = _CFG.sma_windows
+    price_vs_sma_window = _CFG.price_vs_sma_window
+    sma_slope_window = _CFG.sma_slope_window
+    sma_slope_lookback = _CFG.sma_slope_lookback
+    rsi_period = _CFG.rsi_period
+    macd_fast, macd_slow, macd_signal = _CFG.macd_fast, _CFG.macd_slow, _CFG.macd_signal
+    bollinger_window, bollinger_num_std = _CFG.bollinger_window, _CFG.bollinger_num_std
+    atr_period = _CFG.atr_period
+    realized_vol_window = _CFG.realized_vol_window
+    relative_volume_window = _CFG.relative_volume_window
+
     def reading(
         name: str, series: pd.Series, description: str, params: dict[str, int], min_bars: int
     ) -> IndicatorReading:
@@ -199,24 +213,24 @@ def compute_technical_snapshot(symbol: str, bars: list[OHLCVBar]) -> TechnicalSn
 
     indicators: list[IndicatorReading] = []
 
-    sma20 = _sma_series(closes, 20)
-    sma50 = _sma_series(closes, 50)
-    sma100 = _sma_series(closes, 100)
-    sma200 = _sma_series(closes, 200)
+    sma20 = _sma_series(closes, sma_w1)
+    sma50 = _sma_series(closes, sma_w2)
+    sma100 = _sma_series(closes, sma_w3)
+    sma200 = _sma_series(closes, sma_w4)
     indicators.append(
-        reading("sma_20", sma20, "20-day simple moving average of the close.", {"window": 20}, 20)
+        reading("sma_20", sma20, "20-day simple moving average of the close.", {"window": sma_w1}, sma_w1)
     )
     indicators.append(
-        reading("sma_50", sma50, "50-day simple moving average of the close.", {"window": 50}, 50)
+        reading("sma_50", sma50, "50-day simple moving average of the close.", {"window": sma_w2}, sma_w2)
     )
     indicators.append(
         reading(
-            "sma_100", sma100, "100-day simple moving average of the close.", {"window": 100}, 100
+            "sma_100", sma100, "100-day simple moving average of the close.", {"window": sma_w3}, sma_w3
         )
     )
     indicators.append(
         reading(
-            "sma_200", sma200, "200-day simple moving average of the close.", {"window": 200}, 200
+            "sma_200", sma200, "200-day simple moving average of the close.", {"window": sma_w4}, sma_w4
         )
     )
     indicators.append(
@@ -224,47 +238,47 @@ def compute_technical_snapshot(symbol: str, bars: list[OHLCVBar]) -> TechnicalSn
             "price_vs_sma_50_pct",
             _price_vs_ma_series(closes, sma50),
             "Percent distance of the latest close from the 50-day SMA.",
-            {"window": 50},
-            50,
+            {"window": price_vs_sma_window},
+            price_vs_sma_window,
         )
     )
     indicators.append(
         reading(
             "sma_50_slope_10d_pct",
-            _ma_slope_series(sma50, 10),
+            _ma_slope_series(sma50, sma_slope_lookback),
             "Percent change in the 50-day SMA over the last 10 bars.",
-            {"window": 50, "lookback": 10},
-            60,
+            {"window": sma_slope_window, "lookback": sma_slope_lookback},
+            sma_slope_window + sma_slope_lookback,
         )
     )
 
     indicators.append(
         reading(
             "rsi_14",
-            _rsi_series(closes, 14),
+            _rsi_series(closes, rsi_period),
             "14-period relative strength index (Wilder smoothing).",
-            {"period": 14},
-            14,
+            {"period": rsi_period},
+            rsi_period,
         )
     )
 
-    macd_line, macd_signal, macd_hist = _macd_series(closes, 12, 26, 9)
+    macd_line, macd_signal_line, macd_hist = _macd_series(closes, macd_fast, macd_slow, macd_signal)
     indicators.append(
         reading(
             "macd_line",
             macd_line,
             "MACD line: 12-day EMA of the close minus the 26-day EMA.",
-            {"fast": 12, "slow": 26},
-            26,
+            {"fast": macd_fast, "slow": macd_slow},
+            macd_slow,
         )
     )
     indicators.append(
         reading(
             "macd_signal",
-            macd_signal,
+            macd_signal_line,
             "9-day EMA of the MACD line.",
-            {"fast": 12, "slow": 26, "signal": 9},
-            35,
+            {"fast": macd_fast, "slow": macd_slow, "signal": macd_signal},
+            macd_slow + macd_signal,
         )
     )
     indicators.append(
@@ -272,20 +286,20 @@ def compute_technical_snapshot(symbol: str, bars: list[OHLCVBar]) -> TechnicalSn
             "macd_histogram",
             macd_hist,
             "MACD line minus its signal line.",
-            {"fast": 12, "slow": 26, "signal": 9},
-            35,
+            {"fast": macd_fast, "slow": macd_slow, "signal": macd_signal},
+            macd_slow + macd_signal,
         )
     )
 
-    percent_b, bandwidth_pct = _bollinger_series(closes, 20, 2)
+    percent_b, bandwidth_pct = _bollinger_series(closes, bollinger_window, bollinger_num_std)
     indicators.append(
         reading(
             "bollinger_percent_b",
             percent_b,
             "Position of the close within the 20-day, 2-std Bollinger Bands "
             "(0 = lower band, 100 = upper band).",
-            {"window": 20, "num_std": 2},
-            20,
+            {"window": bollinger_window, "num_std": bollinger_num_std},
+            bollinger_window,
         )
     )
     indicators.append(
@@ -293,19 +307,19 @@ def compute_technical_snapshot(symbol: str, bars: list[OHLCVBar]) -> TechnicalSn
             "bollinger_bandwidth_pct",
             bandwidth_pct,
             "Bollinger Band width as a percent of the midline (volatility proxy).",
-            {"window": 20, "num_std": 2},
-            20,
+            {"window": bollinger_window, "num_std": bollinger_num_std},
+            bollinger_window,
         )
     )
 
-    atr, atr_pct = _atr_series(df, 14)
+    atr, atr_pct = _atr_series(df, atr_period)
     indicators.append(
         reading(
             "atr_14",
             atr,
             "14-period average true range (Wilder smoothing), in price units.",
-            {"period": 14},
-            14,
+            {"period": atr_period},
+            atr_period,
         )
     )
     indicators.append(
@@ -313,28 +327,28 @@ def compute_technical_snapshot(symbol: str, bars: list[OHLCVBar]) -> TechnicalSn
             "atr_14_pct",
             atr_pct,
             "14-period ATR as a percent of the latest close.",
-            {"period": 14},
-            14,
+            {"period": atr_period},
+            atr_period,
         )
     )
 
     indicators.append(
         reading(
             "realized_volatility_20d_annualized_pct",
-            _realized_volatility_series(closes, 20),
+            _realized_volatility_series(closes, realized_vol_window),
             "Annualized standard deviation of 20-day daily log returns.",
-            {"window": 20},
-            21,
+            {"window": realized_vol_window},
+            realized_vol_window + 1,
         )
     )
 
     indicators.append(
         reading(
             "relative_volume_20d_pct",
-            _relative_volume_series(df["volume"], 20),
+            _relative_volume_series(df["volume"], relative_volume_window),
             "Today's volume as a percent of the prior 20-day average volume.",
-            {"window": 20},
-            21,
+            {"window": relative_volume_window},
+            relative_volume_window + 1,
         )
     )
 

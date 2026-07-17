@@ -72,12 +72,16 @@ def test_technical_snapshot_returns_computed_indicators(client):
 
 
 def test_technical_snapshot_reuses_silver_on_second_request(client):
+    # FreshnessPolicy compares against the most recent completed exchange
+    # session, so this series must reach today for the second request to
+    # be considered fresh (no re-ingest).
     days = []
-    d = dt.date(2020, 1, 2)
+    d = dt.date.today()
     while len(days) < 300:
         if d.weekday() < 5:
             days.append(d)
-        d += dt.timedelta(days=1)
+        d -= dt.timedelta(days=1)
+    days.reverse()
     bars = [_bar(day, 100 + i * 0.5) for i, day in enumerate(days)]
     provider = _FakeProvider(bars)
 

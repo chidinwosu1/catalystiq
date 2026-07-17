@@ -17,14 +17,7 @@ from sqlalchemy.orm import Session
 from catalystiq.analysis.market_context import SECTOR_ETF_MAP
 from catalystiq.auth import verify_action_key
 from catalystiq.db.base import get_db
-from catalystiq.pipelines.market_price_pipeline import (
-    build_gold_market_context,
-    build_gold_market_structure,
-    build_gold_risk,
-    build_gold_technical,
-    build_gold_volume_liquidity,
-    ensure_fresh,
-)
+from catalystiq.pipelines.market_price_pipeline import GoldProduct, build_gold, ensure_fresh
 from catalystiq.providers.market_data import (
     MarketDataError,
     MarketDataProvider,
@@ -74,7 +67,10 @@ def get_technical_snapshot(
     db: Session = Depends(get_db),
 ):
     _ensure_fresh(provider, symbol, db, days)
-    return build_gold_technical(symbol, db, provider_name=type(provider).__name__)
+    results = build_gold(
+        symbol, db, requested_products={GoldProduct.TECHNICAL}, provider_name=type(provider).__name__
+    )
+    return results[GoldProduct.TECHNICAL]
 
 
 @router.get("/{symbol}/market-structure", response_model=MarketStructureSnapshot)
@@ -85,7 +81,10 @@ def get_market_structure_snapshot(
     db: Session = Depends(get_db),
 ):
     _ensure_fresh(provider, symbol, db, days)
-    return build_gold_market_structure(symbol, db, provider_name=type(provider).__name__)
+    results = build_gold(
+        symbol, db, requested_products={GoldProduct.MARKET_STRUCTURE}, provider_name=type(provider).__name__
+    )
+    return results[GoldProduct.MARKET_STRUCTURE]
 
 
 @router.get("/{symbol}/risk", response_model=RiskSnapshot)
@@ -99,9 +98,14 @@ def get_risk_snapshot(
     _ensure_fresh(provider, symbol, db, days)
     resolved_benchmark = _ensure_fresh_optional(provider, benchmark, db, days)
 
-    snapshot = build_gold_risk(
-        symbol, db, benchmark_symbol=resolved_benchmark, provider_name=type(provider).__name__
+    results = build_gold(
+        symbol,
+        db,
+        requested_products={GoldProduct.RISK},
+        benchmark_symbol=resolved_benchmark,
+        provider_name=type(provider).__name__,
     )
+    snapshot = results[GoldProduct.RISK]
     if benchmark and not resolved_benchmark:
         # Beta/correlation just come back "not_supported" instead of
         # blocking the rest of the risk snapshot.
@@ -117,7 +121,10 @@ def get_volume_liquidity_snapshot(
     db: Session = Depends(get_db),
 ):
     _ensure_fresh(provider, symbol, db, days)
-    return build_gold_volume_liquidity(symbol, db, provider_name=type(provider).__name__)
+    results = build_gold(
+        symbol, db, requested_products={GoldProduct.VOLUME_LIQUIDITY}, provider_name=type(provider).__name__
+    )
+    return results[GoldProduct.VOLUME_LIQUIDITY]
 
 
 @router.get("/{symbol}/market-context", response_model=MarketContextSnapshot)
@@ -143,12 +150,14 @@ def get_market_context_snapshot(
     if sector_symbol and not resolved_sector:
         warnings.append(f"Sector benchmark {sector_symbol!r} unavailable.")
 
-    snapshot = build_gold_market_context(
+    results = build_gold(
         symbol,
         db,
+        requested_products={GoldProduct.MARKET_CONTEXT},
         market_symbol=resolved_market,
         sector_symbol=resolved_sector,
         provider_name=type(provider).__name__,
     )
+    snapshot = results[GoldProduct.MARKET_CONTEXT]
     snapshot.warnings.extend(warnings)
     return snapshot

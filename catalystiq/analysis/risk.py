@@ -23,30 +23,32 @@ from catalystiq.analysis.common import (
     insufficient,
     make_reading,
 )
+from catalystiq.analysis.config import DEFAULT_RISK_CONFIG as _CFG
 from catalystiq.schemas.analysis import FeatureReading
 from catalystiq.schemas.market_data import OHLCVBar
 from catalystiq.schemas.risk import RiskFlag, RiskSnapshot
 
-# --- Configuration (documented, to be promoted to versioned config per §25) ---
-REALIZED_VOL_WINDOWS = (10, 20, 60, 252)
-DOWNSIDE_DEV_WINDOW = 60
-AVG_DAILY_RANGE_WINDOW = 20
-GAP_STDEV_WINDOW = 60
-VAR_SAMPLE_MAX = 252
-VAR_CONFIDENCE = 0.95
-CORRELATION_WINDOW = 60
-TRADING_DAYS_PER_YEAR = 252
-SHARPE_RISK_FREE_RATE_ANNUAL = 0.0  # static documented assumption, not a live source
+# --- Configuration - sourced from catalystiq/analysis/config.py
+# (RiskConfig): externalized, versioned, values unchanged. ---
+REALIZED_VOL_WINDOWS = _CFG.realized_vol_windows
+DOWNSIDE_DEV_WINDOW = _CFG.downside_dev_window
+AVG_DAILY_RANGE_WINDOW = _CFG.avg_daily_range_window
+GAP_STDEV_WINDOW = _CFG.gap_stdev_window
+VAR_SAMPLE_MAX = _CFG.var_sample_max
+VAR_CONFIDENCE = _CFG.var_confidence
+CORRELATION_WINDOW = _CFG.correlation_window
+TRADING_DAYS_PER_YEAR = _CFG.trading_days_per_year
+SHARPE_RISK_FREE_RATE_ANNUAL = _CFG.sharpe_risk_free_rate_annual  # static documented assumption, not a live source
 
-MIN_BARS_FOR_VAR = 60
-MIN_BARS_FOR_RATIOS = 61
+MIN_BARS_FOR_VAR = _CFG.min_bars_for_var
+MIN_BARS_FOR_RATIOS = _CFG.min_bars_for_ratios
 
-ELEVATED_VOL_PERCENTILE_THRESHOLD = 80
-EXTREME_ATR_PERCENTILE_THRESHOLD = 90
-LARGE_GAP_STDEV_THRESHOLD_PCT = 2.0
-HIGH_CORRELATION_THRESHOLD = 0.8
-SIGNIFICANT_DRAWDOWN_THRESHOLD_PCT = -10.0
-THIN_LIQUIDITY_DOLLAR_VOLUME_THRESHOLD = 1_000_000.0
+ELEVATED_VOL_PERCENTILE_THRESHOLD = _CFG.elevated_vol_percentile_threshold
+EXTREME_ATR_PERCENTILE_THRESHOLD = _CFG.extreme_atr_percentile_threshold
+LARGE_GAP_STDEV_THRESHOLD_PCT = _CFG.large_gap_stdev_threshold_pct
+HIGH_CORRELATION_THRESHOLD = _CFG.high_correlation_threshold
+SIGNIFICANT_DRAWDOWN_THRESHOLD_PCT = _CFG.significant_drawdown_threshold_pct
+THIN_LIQUIDITY_DOLLAR_VOLUME_THRESHOLD = _CFG.thin_liquidity_dollar_volume_threshold
 
 
 def _log_returns(closes: pd.Series) -> pd.Series:

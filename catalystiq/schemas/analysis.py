@@ -79,20 +79,37 @@ class FeatureReading(BaseModel):
     zscore_5y: float | None = None
 
 
+class LineageDependency(BaseModel):
+    """One upstream symbol a Gold calculation actually read beyond the
+    primary requested symbol - e.g. Risk's benchmark, Market Context's
+    market/sector ETFs. Makes multi-symbol lineage explicit in the API
+    response instead of silently folded into (or omitted from) the primary
+    symbol's own lineage."""
+
+    role: str  # primary | benchmark | market | sector
+    symbol: str
+    silver_record_count: int
+    silver_build_run_id: int | None = None
+
+
 class Lineage(BaseModel):
-    """Traces a Gold record back through Silver to its Bronze ingestion run,
-    per the medallion-architecture requirement: every Gold record must be
-    traceable to a calculation version, the Silver data it was built from,
-    the Bronze ingestion run behind that, the source provider, and when it
-    was calculated. Attached to every Gold snapshot response
-    (TechnicalSnapshot, MarketStructureSnapshot, RiskSnapshot,
-    VolumeLiquiditySnapshot, MarketContextSnapshot) - see
-    catalystiq/pipelines/market_price_pipeline.py's build_gold()."""
+    """Traces a Gold record back through a specific Silver build to the
+    Bronze ingestion run(s) behind it, per the medallion-architecture
+    requirement: every Gold record must be traceable to a calculation
+    version, a configuration version, the exact Silver build it was
+    computed from, the source provider, and when it was calculated.
+    Attached to every Gold snapshot response (TechnicalSnapshot,
+    MarketStructureSnapshot, RiskSnapshot, VolumeLiquiditySnapshot,
+    MarketContextSnapshot) - see
+    catalystiq/pipelines/market_price_pipeline.py's build_gold_*()."""
 
     calculation_version: str
+    configuration_version: str
     silver_record_count: int
     silver_date_range_start: dt.date | None = None
     silver_date_range_end: dt.date | None = None
     bronze_ingestion_run_id: int | None = None
+    silver_build_run_id: int | None = None
     source_provider: str
     calculated_at: dt.datetime
+    dependencies: list[LineageDependency] = []

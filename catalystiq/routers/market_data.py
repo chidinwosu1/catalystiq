@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from catalystiq.auth import verify_action_key
 from catalystiq.db.base import get_db
-from catalystiq.pipelines.market_price_pipeline import build_silver, ingest_bronze
+from catalystiq.pipelines.market_price_pipeline import build_silver, ingest_bronze, ingest_bronze_quote
 from catalystiq.providers.market_data import (
     MarketDataError,
     MarketDataProvider,
@@ -80,13 +80,17 @@ def ingest_price_history(
     market_price_pipeline.py): fetches raw OHLCV into an append-only Bronze
     ingestion run, then validates/cleans/upserts into Silver. Re-running
     ingestion is safe to repeat - Bronze never overwrites a prior run, and
-    Silver upserts are idempotent per ticker+date.
+    Silver upserts are idempotent per ticker+date. The live quote used for
+    cross-validation is persisted (BronzeMarketQuote) rather than fetched
+    and discarded; a quote-fetch failure doesn't block ingestion - it just
+    means this build has no live-quote cross-check, same as if none had
+    been requested.
     """
     try:
         run = ingest_bronze(symbol, days, provider, db)
-        live_quote = provider.get_quote(symbol)
     except MarketDataError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    live_quote = ingest_bronze_quote(symbol, provider, db, ingestion_run=run)
     result = build_silver(symbol, db, ingestion_run=run, live_quote=live_quote)
     return result.report

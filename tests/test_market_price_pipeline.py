@@ -9,13 +9,35 @@ from catalystiq.schemas.market_data import OHLCVBar, Quote
 
 
 def _bars(n=300, start=None, close_fn=None):
-    start = start or dt.date(2022, 1, 3)
+    """Defaults to a series ending TODAY (walking backward) so
+    FreshnessPolicy - which compares against the most recent completed
+    exchange session - considers the result fresh unless a test
+    deliberately wants otherwise. Pass an explicit `start` for tests that
+    don't care about freshness (e.g. quarantine/validation-only tests)."""
     close_fn = close_fn or (lambda i: 100 + i * 0.25)
     bars = []
-    d = start
+    if start is not None:
+        d = start
+        while len(bars) < n:
+            if d.weekday() < 5:
+                close = close_fn(len(bars))
+                bars.append(
+                    OHLCVBar(
+                        date=d,
+                        open=close - 0.2,
+                        high=close + 0.5,
+                        low=close - 0.5,
+                        close=close,
+                        volume=1_000_000 + len(bars),
+                    )
+                )
+            d += dt.timedelta(days=1)
+        return bars
+
+    d = dt.date.today()
     while len(bars) < n:
         if d.weekday() < 5:
-            close = close_fn(len(bars))
+            close = close_fn(n - 1 - len(bars))
             bars.append(
                 OHLCVBar(
                     date=d,
@@ -26,7 +48,8 @@ def _bars(n=300, start=None, close_fn=None):
                     volume=1_000_000 + len(bars),
                 )
             )
-        d += dt.timedelta(days=1)
+        d -= dt.timedelta(days=1)
+    bars.reverse()
     return bars
 
 
@@ -180,7 +203,7 @@ def test_build_silver_flags_but_keeps_abnormal_gap_bar(test_db_session):
     assert result.rejected == 0
     flagged = (
         test_db_session.query(models.SilverPriceBar)
-        .filter_by(data_quality_status="flagged")
+        .filter_by(data_quality_status="clean_with_warnings")
         .all()
     )
     assert len(flagged) >= 1
@@ -236,16 +259,35 @@ def test_ensure_fresh_noops_when_data_is_fresh(test_db_session):
 
 
 def test_ensure_fresh_reingests_when_stale(test_db_session):
+    """Staleness is now defined by exchange-calendar coverage, not wall-
+    clock age: removing the most recent trading session's Silver row
+    (simulating "today's close hasn't landed yet, and now it has") makes
+    FreshnessPolicy see a gap and re-ingest."""
     provider = _FakeProvider(_bars(300))
     pipe.ensure_fresh("AAPL", provider, test_db_session)
+    assert provider.calls == 1
 
-    stale_time = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None) - dt.timedelta(hours=48)
-    test_db_session.query(models.SilverPriceBar).update({"updated_at": stale_time})
+    # Delete the two most recent sessions - regardless of exactly when
+    # "today" this test happens to run (even right at the market-close
+    # boundary), yesterday's session has unambiguously already closed, so
+    # this always leaves Silver at least one full completed session behind.
+    ticker = test_db_session.query(models.Ticker).filter_by(symbol="AAPL").one()
+    latest_rows = (
+        test_db_session.query(models.SilverPriceBar)
+        .filter_by(ticker_id=ticker.id)
+        .order_by(models.SilverPriceBar.date.desc())
+        .limit(2)
+        .all()
+    )
+    for row in latest_rows:
+        test_db_session.delete(row)
     test_db_session.commit()
 
-    pipe.ensure_fresh("AAPL", provider, test_db_session, max_age_hours=24)
+    pipe.ensure_fresh("AAPL", provider, test_db_session)
 
     assert provider.calls == 2
+
+
 
 
 # --- Gold products: read only Silver, persist lineage --------------------

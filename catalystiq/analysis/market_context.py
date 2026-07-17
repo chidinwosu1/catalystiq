@@ -20,15 +20,17 @@ import datetime as dt
 import pandas as pd
 
 from catalystiq.analysis.common import bars_to_frame, history_days_available, insufficient, make_reading
+from catalystiq.analysis.config import DEFAULT_MARKET_CONTEXT_CONFIG as _CFG
 from catalystiq.schemas.analysis import FeatureReading
 from catalystiq.schemas.market_context import MarketContextSnapshot
 from catalystiq.schemas.market_data import OHLCVBar
 
-# --- Configuration (documented, to be promoted to versioned config per §25) ---
-RELATIVE_RETURN_WINDOWS = (1, 5, 20, 60, 252)
-BETA_CORRELATION_WINDOW = 60
-RELATIVE_STRENGTH_SLOPE_WINDOW = 10
-LEADING_LAGGING_WINDOW = 20
+# --- Configuration - sourced from catalystiq/analysis/config.py
+# (MarketContextConfig): externalized, versioned, values unchanged. ---
+RELATIVE_RETURN_WINDOWS = _CFG.relative_return_windows
+BETA_CORRELATION_WINDOW = _CFG.beta_correlation_window
+RELATIVE_STRENGTH_SLOPE_WINDOW = _CFG.relative_strength_slope_window
+LEADING_LAGGING_WINDOW = _CFG.leading_lagging_window
 
 SECTOR_ETF_MAP = {
     "Technology": "XLK",
