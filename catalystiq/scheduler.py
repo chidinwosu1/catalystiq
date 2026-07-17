@@ -1,6 +1,12 @@
 """Executes due scheduled orders (§1.1 Execution Zone / Rules Engine's
 periodic re-run, per the scheduler/workers line in the build spec).
 
+`get_broker` is injected from `catalystiq.providers.broker.get_broker_provider`
+(see catalystiq/main.py's lifespan), which always resolves to WebullBroker -
+so every scheduled order submitted here goes through
+BrokerProvider -> WebullBroker -> Webull Trading API, with no other broker
+in the path.
+
 This is an in-process poller, not a real task queue (no Celery/Redis) - it
 only runs while this FastAPI process is alive. See catalystiq/main.py's
 lifespan for where it's started, and the README for that limitation.

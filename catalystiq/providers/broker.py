@@ -1,12 +1,21 @@
-"""BrokerProvider interface (§1.1 Execution Zone), the Alpaca paper-trading
-implementation, and a Webull OpenAPI implementation
+"""BrokerProvider interface (§1.1 Execution Zone) and WebullBroker, the sole
+active broker implementation
 (https://developer.webull.com/apis/docs/trade-api/getting-started).
 
-The build spec's execution zone always targeted Webull's paper-trading
-endpoint; Alpaca was this codebase's original, already-working integration,
-kept as the default BrokerProvider behind this same interface. WebullBroker
-below is a real integration against the official `webull-openapi-python-sdk`
-- see its docstring for what is and isn't verified.
+The active broker flow is always:
+
+    Catalyst IQ backend -> BrokerProvider -> WebullBroker -> Webull Trading API
+
+`get_broker_provider()` below only ever constructs `WebullBroker`; there is
+no runtime broker selection and no fallback to any other provider. See its
+docstring for the exact failure behavior when Webull isn't configured.
+
+`AlpacaPaperBroker` remains in this module as a disabled legacy adapter -
+it predates the Webull integration and is kept only because
+`tests/test_broker_provider.py` still exercises its own field-mapping logic
+in isolation. It is never constructed by `get_broker_provider()`, never
+initialized as part of the normal application flow, and not reachable from
+any router or the frontend.
 """
 from __future__ import annotations
 
@@ -53,7 +62,13 @@ class BrokerProvider(ABC):
 
 
 class AlpacaPaperBroker(BrokerProvider):
-    """BrokerProvider backed by Alpaca's paper-trading environment."""
+    """Disabled legacy adapter, backed by Alpaca's paper-trading environment.
+
+    Not part of the active application flow: `get_broker_provider()` never
+    constructs this class, and nothing in the routers, scheduler, or
+    frontend references it. It's kept only so its own field-mapping logic
+    stays covered by `tests/test_broker_provider.py`.
+    """
 
     def __init__(self, api_key: str, secret_key: str) -> None:
         if not api_key or not secret_key:
@@ -393,18 +408,33 @@ class WebullBroker(BrokerProvider):
         return webull_order
 
 
+_SUPPORTED_BROKER_PROVIDERS = {"webull"}
+
+
 def get_broker_provider() -> BrokerProvider:
-    """Factory returning the configured BrokerProvider (§config.broker_provider)."""
+    """Factory returning the active BrokerProvider - always WebullBroker.
+
+    This runs as a FastAPI dependency, so a BrokerError raised here (either
+    for an unsupported BROKER_PROVIDER value or missing Webull credentials)
+    is caught by the app-level `@app.exception_handler(BrokerError)` and
+    turned into a clean 502 JSON response - never an unhandled 500, and
+    never a silent fallback to any other broker.
+    """
     from catalystiq.config import get_settings
 
     settings = get_settings()
-    if settings.broker_provider == "webull":
-        return WebullBroker(
-            settings.webull_app_key,
-            settings.webull_app_secret,
-            settings.webull_account_id,
-            region_id=settings.webull_region_id,
-            api_endpoint=settings.webull_api_endpoint,
-            token_dir=settings.webull_token_dir,
+    if settings.broker_provider not in _SUPPORTED_BROKER_PROVIDERS:
+        raise BrokerError(
+            f"Unsupported BROKER_PROVIDER={settings.broker_provider!r}. "
+            f"Only {sorted(_SUPPORTED_BROKER_PROVIDERS)} is supported - Webull is the "
+            "sole active broker and there is no fallback to any other provider."
         )
-    return AlpacaPaperBroker(settings.alpaca_api_key, settings.alpaca_secret_key)
+
+    return WebullBroker(
+        settings.webull_app_key,
+        settings.webull_app_secret,
+        settings.webull_account_id,
+        region_id=settings.webull_region_id,
+        api_endpoint=settings.webull_api_endpoint,
+        token_dir=settings.webull_token_dir,
+    )

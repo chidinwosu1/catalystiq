@@ -18,12 +18,14 @@ def test_broker_construction_failure_returns_clean_502_with_cors(client, monkeyp
     a BrokerError raised there (e.g. missing credentials) used to become an
     unhandled 500 that skipped CORSMiddleware - the browser reported it as a
     CORS failure instead of the real "not configured" error. The
-    BrokerError exception handler in main.py fixes this.
+    BrokerError exception handler in main.py fixes this. Webull is the
+    default/sole broker, so clearing its credentials is what triggers this.
     """
     from catalystiq.config import get_settings
 
-    monkeypatch.setenv("ALPACA_API_KEY", "")
-    monkeypatch.setenv("ALPACA_SECRET_KEY", "")
+    monkeypatch.setenv("WEBULL_APP_KEY", "")
+    monkeypatch.setenv("WEBULL_APP_SECRET", "")
+    monkeypatch.setenv("WEBULL_ACCOUNT_ID", "")
     get_settings.cache_clear()
     try:
         response = client.get(
@@ -31,6 +33,25 @@ def test_broker_construction_failure_returns_clean_502_with_cors(client, monkeyp
         )
         assert response.status_code == 502
         assert "not configured" in response.json()["detail"]
+        assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
+    finally:
+        get_settings.cache_clear()
+
+
+def test_unsupported_broker_provider_returns_clean_502_with_cors(client, monkeypatch):
+    """BROKER_PROVIDER values other than "webull" are rejected outright -
+    no fallback to Alpaca or any other provider, and the same clean-502-
+    with-CORS handling applies as for missing credentials."""
+    from catalystiq.config import get_settings
+
+    monkeypatch.setenv("BROKER_PROVIDER", "alpaca")
+    get_settings.cache_clear()
+    try:
+        response = client.get(
+            "/paper/account", headers={"Origin": "http://localhost:5173"}
+        )
+        assert response.status_code == 502
+        assert "Unsupported BROKER_PROVIDER" in response.json()["detail"]
         assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
     finally:
         get_settings.cache_clear()

@@ -3,7 +3,7 @@ import datetime as dt
 from unittest.mock import MagicMock
 
 from catalystiq.db import models
-from catalystiq.providers.broker import BrokerError
+from catalystiq.providers.broker import BrokerError, WebullBroker, get_broker_provider
 from catalystiq.scheduler import run_due_scheduled_orders
 
 
@@ -64,6 +64,39 @@ def test_marks_failed_on_broker_rejection(test_db_session):
 
     assert touched[0].status == "failed"
     assert "insufficient buying power" in touched[0].error_detail
+
+
+def test_scheduled_orders_are_submitted_through_webull(test_db_session, monkeypatch):
+    """End-to-end through the real factory: the broker `run_due_scheduled_orders`
+    submits through is a genuine WebullBroker, and the order actually reaches
+    Webull's order_v3.place_order - not some other provider."""
+    from catalystiq.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("BROKER_PROVIDER", "webull")
+    monkeypatch.setenv("WEBULL_APP_KEY", "key")
+    monkeypatch.setenv("WEBULL_APP_SECRET", "secret")
+    monkeypatch.setenv("WEBULL_ACCOUNT_ID", "acct")
+
+    fake_trade_client = MagicMock()
+    fake_response = MagicMock(status_code=200)
+    fake_response.json.return_value = {"id": "webull-order-1", "status": "accepted"}
+    fake_trade_client.order_v3.place_order.return_value = fake_response
+    monkeypatch.setattr("webull.core.client.ApiClient", lambda *a, **k: MagicMock())
+    monkeypatch.setattr("webull.trade.trade_client.TradeClient", lambda *a: fake_trade_client)
+
+    try:
+        broker = get_broker_provider()
+        assert isinstance(broker, WebullBroker)
+
+        make_row(test_db_session, minutes_from_now=-1)
+        touched = run_due_scheduled_orders(test_db_session, broker)
+
+        assert touched[0].status == "submitted"
+        assert touched[0].broker_order_id == "webull-order-1"
+        fake_trade_client.order_v3.place_order.assert_called_once()
+    finally:
+        get_settings.cache_clear()
 
 
 def test_processes_multiple_due_orders_independently(test_db_session):

@@ -1,7 +1,7 @@
 fastapi
 uvicorn[standard]
-alpaca-py
 webull-openapi-python-sdk
+alpaca-py  # disabled legacy adapter only - see catalystiq/providers/broker.py
 pydantic
 pydantic-settings
 sqlalchemy

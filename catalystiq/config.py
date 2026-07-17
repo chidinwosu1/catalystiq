@@ -10,12 +10,11 @@ class Settings(BaseSettings):
     # Auth for the paper-trading action endpoints.
     action_api_key: str = ""
 
-    # Which BrokerProvider to use: "alpaca" or "webull".
-    broker_provider: str = "alpaca"
-
-    # Alpaca paper-trading credentials.
-    alpaca_api_key: str = ""
-    alpaca_secret_key: str = ""
+    # Which BrokerProvider to use. Webull is the only supported, active
+    # broker - see catalystiq/providers/broker.py's get_broker_provider(),
+    # which rejects any other value rather than falling back to anything
+    # else.
+    broker_provider: str = "webull"
 
     # Webull OpenAPI credentials (https://developer.webull.com/apis/docs/trade-api/getting-started).
     # region_id is e.g. "us" or "hk"; api_endpoint defaults to Webull's own

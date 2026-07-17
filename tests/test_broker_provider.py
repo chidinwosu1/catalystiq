@@ -1,4 +1,9 @@
-"""AlpacaPaperBroker mapping tests, using a mocked alpaca TradingClient - no network."""
+"""AlpacaPaperBroker mapping tests, using a mocked alpaca TradingClient - no
+network. AlpacaPaperBroker is a disabled legacy adapter (see
+catalystiq/providers/broker.py's module docstring) - these tests cover only
+its own field-mapping logic in isolation; they don't exercise the active
+application flow, which always goes through WebullBroker
+(see tests/test_broker_factory.py and tests/test_webull_broker.py)."""
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 

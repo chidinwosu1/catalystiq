@@ -15,17 +15,27 @@ This codebase currently implements **Phase 1 — Data plumbing**:
 
 - `MarketDataProvider` interface (`catalystiq/providers/market_data.py`),
   with a Yahoo Finance implementation (`yfinance`).
-- `BrokerProvider` interface (`catalystiq/providers/broker.py`), with two
-  implementations: `AlpacaPaperBroker` (carried over from the original
-  `app.py`; still the default) and `WebullBroker`, a real integration
-  against the official `webull-openapi-python-sdk`, matching the build
-  spec's original target. Switch with `BROKER_PROVIDER=webull`. The order
+- `BrokerProvider` interface (`catalystiq/providers/broker.py`). The active
+  broker flow is always:
+
+  ```
+  Catalyst IQ backend -> BrokerProvider -> WebullBroker -> Webull Trading API
+  ```
+
+  `WebullBroker` is a real integration against the official
+  `webull-openapi-python-sdk`, matching the build spec's original target,
+  and is the **sole** broker the application constructs - `get_broker_provider()`
+  rejects any `BROKER_PROVIDER` value other than `webull` with a clear
+  `BrokerError` (502) rather than falling back to anything else. The order
   write-path (place/replace/cancel/detail/open) is fully implemented and
   verified against the SDK's real source and Webull's own docs;
   `get_account()`/`get_positions()` deliberately raise rather than guess at
   Webull's balance/position JSON field names, which this build couldn't
   verify — see `WebullBroker`'s docstring and use `get_account_balance_raw()`
-  / `get_positions_raw()` in the meantime.
+  / `get_positions_raw()` in the meantime. (`AlpacaPaperBroker` also still
+  exists in the same module as a disabled legacy adapter, kept only so its
+  own unit tests keep running - it's never constructed by the running
+  application.)
 - Postgres schema (`catalystiq/db/models.py`, migrated with Alembic) matching
   the spec's schema sketch: `tickers`, `price_history`,
   `indicator_snapshots`, `options_snapshots`, `news_events`,
@@ -82,7 +92,8 @@ catalystiq/
     models.py            # ORM models (§7 schema)
   providers/
     market_data.py       # MarketDataProvider ABC + YahooFinanceProvider
-    broker.py              # BrokerProvider ABC + AlpacaPaperBroker + WebullBroker
+    broker.py              # BrokerProvider ABC + WebullBroker (sole active broker;
+                            # AlpacaPaperBroker also lives here as a disabled legacy adapter)
   schemas/                # Pydantic request/response/domain shapes
   validation/
     data_quality.py        # Data Validation Layer (§2.9)
@@ -106,9 +117,8 @@ Environment variables (`catalystiq/config.py`):
 | Variable | Purpose | Default |
 |---|---|---|
 | `ACTION_API_KEY` | Bearer token required on all `/paper/*` and `/market-data/*` endpoints | — (required) |
-| `BROKER_PROVIDER` | Which `BrokerProvider` to use: `alpaca` or `webull` | `alpaca` |
-| `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` | Alpaca paper-trading credentials | — (required if `BROKER_PROVIDER=alpaca`) |
-| `WEBULL_APP_KEY` / `WEBULL_APP_SECRET` / `WEBULL_ACCOUNT_ID` | Webull OpenAPI credentials ([apply here](https://developer.webull.com/apis/docs/authentication/apply/); shared test accounts also work without applying) | — (required if `BROKER_PROVIDER=webull`) |
+| `BROKER_PROVIDER` | Which `BrokerProvider` to use. Webull is the only supported value - anything else is rejected with a `BrokerError` (502), no fallback | `webull` |
+| `WEBULL_APP_KEY` / `WEBULL_APP_SECRET` / `WEBULL_ACCOUNT_ID` | Webull OpenAPI credentials ([apply here](https://developer.webull.com/apis/docs/authentication/apply/); shared test accounts also work without applying) | — (required) |
 | `WEBULL_REGION_ID` | Webull region, e.g. `us` or `hk` | `us` |
 | `WEBULL_API_ENDPOINT` | Override the SDK's resolved endpoint (e.g. to pin the sandbox host) | — (SDK default) |
 | `WEBULL_TOKEN_DIR` | Where the SDK stores its 2FA token after the first call | — (SDK default, `conf/token.txt`) |
