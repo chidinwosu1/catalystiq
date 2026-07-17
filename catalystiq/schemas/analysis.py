@@ -37,3 +37,42 @@ class TechnicalSnapshot(BaseModel):
     history_days_available: int
     indicators: list[IndicatorReading]
     warnings: list[str] = []
+
+
+# --- Shared contract for every analytical data product added after the
+# technical indicator engine above (market structure, risk, volume/
+# liquidity, market context, and beyond). Generalizes IndicatorReading's
+# status/value/insufficient-data pattern with the full status vocabulary
+# from the quantitative-scoring spec's §15.3 feature-status requirement.
+# IndicatorReading/TechnicalSnapshot are left untouched (already shipped,
+# consumed by the frontend) rather than migrated onto this - new products
+# use FeatureReading directly.
+
+FeatureStatus = Literal[
+    "available",
+    "insufficient_data",
+    "not_supported",
+    "stale",
+    "invalid",
+    "provider_unavailable",
+    "not_applicable",
+]
+
+
+class FeatureReading(BaseModel):
+    """A single computed value or rule-based classification. `value` is a
+    plain scalar (int/float/str/bool) for simple metrics; structured,
+    multi-field outputs (e.g. a support/resistance level, a risk flag) get
+    their own dedicated schema instead of being forced through this shape -
+    see each product's schemas module. `int` is listed before `float` in
+    the union so whole-number counts (e.g. consecutive-swing counts) stay
+    integers instead of being coerced to N.0."""
+
+    name: str
+    status: FeatureStatus
+    value: int | float | str | bool | None = None
+    description: str
+    params: dict[str, int | float | str] = {}
+    calculation_version: str = "1.0.0"
+    percentile_5y: float | None = None
+    zscore_5y: float | None = None

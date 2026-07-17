@@ -68,6 +68,95 @@ class IndicatorSnapshot(Base):
     percentile_5y: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
+class MarketStructureSnapshotRecord(Base):
+    """Persisted snapshot of the Market Structure data product (§6). Not yet
+    written by anything - the read path
+    (catalystiq/routers/analysis.py's /market-structure endpoint) is
+    stateless/live, matching IndicatorSnapshot above. Named with a
+    `Record` suffix to avoid colliding with
+    catalystiq.schemas.market_structure.MarketStructureSnapshot, the
+    Pydantic API response shape."""
+
+    __tablename__ = "market_structure_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "ticker_id", "date", "calculation_version", name="uq_market_structure_snapshot"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticker_id: Mapped[int] = mapped_column(ForeignKey("tickers.id"), index=True)
+    date: Mapped[dt.date] = mapped_column(index=True)
+    calculation_version: Mapped[str] = mapped_column(String(20))
+    payload: Mapped[dict] = mapped_column(JSON)
+    data_quality_status: Mapped[str] = mapped_column(String(20), default="available")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+
+class RiskSnapshotRecord(Base):
+    """Persisted snapshot of the Volatility & Risk data product (§7). See
+    MarketStructureSnapshotRecord's docstring re: not-yet-written and the
+    `Record` naming convention."""
+
+    __tablename__ = "risk_snapshots"
+    __table_args__ = (
+        UniqueConstraint("ticker_id", "date", "calculation_version", name="uq_risk_snapshot"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticker_id: Mapped[int] = mapped_column(ForeignKey("tickers.id"), index=True)
+    date: Mapped[dt.date] = mapped_column(index=True)
+    calculation_version: Mapped[str] = mapped_column(String(20))
+    benchmark_symbol: Mapped[str | None] = mapped_column(String(15), nullable=True)
+    payload: Mapped[dict] = mapped_column(JSON)
+    data_quality_status: Mapped[str] = mapped_column(String(20), default="available")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+
+class VolumeLiquiditySnapshotRecord(Base):
+    """Persisted snapshot of the Volume & Liquidity data product (§8). See
+    MarketStructureSnapshotRecord's docstring re: not-yet-written and the
+    `Record` naming convention."""
+
+    __tablename__ = "volume_liquidity_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "ticker_id", "date", "calculation_version", name="uq_volume_liquidity_snapshot"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticker_id: Mapped[int] = mapped_column(ForeignKey("tickers.id"), index=True)
+    date: Mapped[dt.date] = mapped_column(index=True)
+    calculation_version: Mapped[str] = mapped_column(String(20))
+    payload: Mapped[dict] = mapped_column(JSON)
+    data_quality_status: Mapped[str] = mapped_column(String(20), default="available")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+
+class MarketContextSnapshotRecord(Base):
+    """Persisted snapshot of the Market & Sector Context data product
+    (§14.1). See MarketStructureSnapshotRecord's docstring re: not-yet-
+    written and the `Record` naming convention."""
+
+    __tablename__ = "market_context_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "ticker_id", "date", "calculation_version", name="uq_market_context_snapshot"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticker_id: Mapped[int] = mapped_column(ForeignKey("tickers.id"), index=True)
+    date: Mapped[dt.date] = mapped_column(index=True)
+    calculation_version: Mapped[str] = mapped_column(String(20))
+    market_symbol: Mapped[str | None] = mapped_column(String(15), nullable=True)
+    sector_symbol: Mapped[str | None] = mapped_column(String(15), nullable=True)
+    payload: Mapped[dict] = mapped_column(JSON)
+    data_quality_status: Mapped[str] = mapped_column(String(20), default="available")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+
 class OptionsSnapshot(Base):
     __tablename__ = "options_snapshots"
     __table_args__ = (UniqueConstraint("ticker_id", "date", name="uq_options_snapshot"),)
