@@ -39,6 +39,45 @@ export const roleClasses: Record<ColorRole, { bg: string; text: string; border: 
   },
 };
 
+import type { ImpactLevel, MarketRegime, RiskLevel } from "../mockDashboardData";
+
+/** Market regime → visual role. Bullish reads success, bearish danger. */
+export function regimeRole(regime: MarketRegime): ColorRole {
+  switch (regime) {
+    case "Bullish":
+      return "success";
+    case "Neutral":
+      return "warning";
+    case "Bearish":
+      return "danger";
+  }
+}
+
+/** Risk level → visual role. Higher risk reads more alarming. */
+export function riskRole(risk: RiskLevel): ColorRole {
+  switch (risk) {
+    case "Low":
+      return "success";
+    case "Moderate":
+      return "warning";
+    case "Elevated":
+    case "High":
+      return "danger";
+  }
+}
+
+/** Expected-impact / severity → visual role. */
+export function impactRole(impact: ImpactLevel): ColorRole {
+  switch (impact) {
+    case "High":
+      return "danger";
+    case "Medium":
+      return "warning";
+    case "Low":
+      return "success";
+  }
+}
+
 export function contributionGlyph(contribution: Contribution): string {
   if (contribution === "+") return "+";
   if (contribution === "-") return "−";

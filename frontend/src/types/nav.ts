@@ -8,6 +8,12 @@ export interface PageDescriptor {
 
 export const PAGES: PageDescriptor[] = [
   {
+    id: "home",
+    label: "Command Center",
+    description:
+      "Your investment command center - today's market read, highest-conviction opportunities, catalysts, alerts, and what to do next.",
+  },
+  {
     id: "trade",
     label: "Trade",
     description:

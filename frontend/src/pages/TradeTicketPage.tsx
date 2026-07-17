@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  Briefcase,
   CheckCircle2,
   ChevronDown,
   Clock,
@@ -27,10 +28,13 @@ import {
   type TimeInForce,
 } from "../lib/api";
 import SectionCard from "../components/SectionCard";
+import NextAction from "../components/NextAction";
+import type { PageId } from "../types/nav";
 
 interface TradeTicketPageProps {
   initialSymbol: string;
   onViewAnalysis: (symbol: string) => void;
+  onNavigate: (page: PageId) => void;
 }
 
 type TradingStyle = "day" | "swing";
@@ -84,7 +88,11 @@ const STATUS_CLASS: Record<string, string> = {
   cancelled: "text-ink-muted",
 };
 
-export default function TradeTicketPage({ initialSymbol, onViewAnalysis }: TradeTicketPageProps) {
+export default function TradeTicketPage({
+  initialSymbol,
+  onViewAnalysis,
+  onNavigate,
+}: TradeTicketPageProps) {
   const [symbolInput, setSymbolInput] = useState(initialSymbol);
   const [symbol, setSymbol] = useState(initialSymbol.trim().toUpperCase());
 
@@ -810,6 +818,15 @@ export default function TradeTicketPage({ initialSymbol, onViewAnalysis }: Trade
           </div>
         </SectionCard>
       )}
+
+      <NextAction
+        step="Next step · Monitor your position"
+        prompt="Order placed? Track fills, live P/L, and risk alerts in your portfolio."
+        label="View Portfolio"
+        icon={<Briefcase size={15} />}
+        onClick={() => onNavigate("portfolio")}
+        secondary={{ label: "Scan the market", onClick: () => onNavigate("markets") }}
+      />
     </div>
   );
 }
