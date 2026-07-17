@@ -87,7 +87,13 @@ def _bollinger_series(
     closes: pd.Series, window: int = 20, num_std: int = 2
 ) -> tuple[pd.Series, pd.Series]:
     mid = closes.rolling(window=window, min_periods=window).mean()
-    std = closes.rolling(window=window, min_periods=window).std()
+    # Population stdev (ddof=0), not pandas' sample-stdev default (ddof=1) -
+    # matches TA-Lib's BBANDS and TradingView's ta.stdev(), both of which
+    # this build's reference-calculation adapter validates against
+    # (catalystiq/validation/reference/). Confirmed via that adapter that
+    # ddof=1 was a real convention deviation from both, not equally-valid
+    # alternative.
+    std = closes.rolling(window=window, min_periods=window).std(ddof=0)
     upper = mid + num_std * std
     lower = mid - num_std * std
     percent_b = (closes - lower) / (upper - lower) * 100
@@ -121,7 +127,13 @@ def _relative_volume_series(volume: pd.Series, window: int = 20) -> pd.Series:
 
 
 def _obv_series(df: pd.DataFrame) -> pd.Series:
-    direction = np.sign(df["close"].diff()).fillna(0)
+    """On-balance volume, standard convention: the first bar's volume is
+    the OBV base (OBV[0] = volume[0]), matching TA-Lib's OBV and the
+    textbook definition - confirmed via the reference-calculation adapter
+    (catalystiq/validation/reference/talib_adapter.py) after an earlier
+    version of this function implicitly started at 0 instead."""
+    direction = np.sign(df["close"].diff())
+    direction.iloc[0] = 1
     return (direction * df["volume"]).cumsum()
 
 

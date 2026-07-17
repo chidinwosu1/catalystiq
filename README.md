@@ -216,6 +216,43 @@ not a pattern to ship.
 
 All of the above require `Authorization: Bearer <ACTION_API_KEY>`.
 
+## Reference-calculation adapter
+
+Every Gold indicator with a standard, named definition is cross-checked
+against a second, independently-coded implementation -
+`catalystiq/validation/reference/`:
+
+- **TA-Lib** (pinned `TA-Lib==0.7.1`) for SMA, RSI, MACD, ATR, OBV,
+  Bollinger Bands, the Accumulation/Distribution line, and MFI.
+- **TradingView's published formula**, independently recoded, for
+  standard indicators TA-Lib doesn't carry: Relative Volume, Chaikin
+  Money Flow, Price Volume Trend, Historical Volatility, and pivot/
+  fractal swing points.
+- An **independent financial-statistics implementation** (numpy/scipy) for
+  Beta, Sharpe/Sortino/Calmar, and historical/parametric VaR.
+- Composite, decision-rule outputs (market regime, trend structure,
+  breakout state, liquidity classification) have no single universal
+  external reference value - they're validated instead via documented
+  decision rules + synthetic scenarios
+  (`catalystiq/validation/reference/composite_scenarios.py`).
+
+This never runs in the synchronous request path. It runs in CI
+(`.github/workflows/reference_validation.yml`, triggered on any change to
+an indicator implementation or its configuration), asynchronously in
+production on a configurable sample of completed Gold builds plus any run
+a cheap synchronous anomaly check flags
+(`REFERENCE_VALIDATION_SAMPLE_RATE`/`REFERENCE_VALIDATION_INTERVAL_SECONDS`,
+`catalystiq/validation/reference/scheduler.py` - same in-process-loop
+pattern as the order scheduler, no task queue), and on demand via the
+CI workflow's manual `workflow_dispatch` trigger - run that before bumping
+any product's `calculation_version` constant, since this repo has no other
+release-promotion gate. A mismatch never overwrites the Gold output - it's
+quarantined (`data_quality_status="quarantined"`, excluded from cache
+reuse) with a full audit row (`gold_reference_check`: symbol, silver
+build, calculation/configuration version, reference library + version,
+parameters, expected/actual values, tolerance, and the discrepancy
+reason).
+
 ## A note on this build environment
 
 Yahoo Finance's and Webull's hosts are both blocked by this sandbox's egress

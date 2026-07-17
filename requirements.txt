@@ -10,6 +10,8 @@ psycopg2-binary
 yfinance
 pandas
 pandas_market_calendars
+scipy
+TA-Lib==0.7.1  # pinned - reference-calculation adapter (catalystiq/validation/reference/)
 
 # dev / test
 pytest

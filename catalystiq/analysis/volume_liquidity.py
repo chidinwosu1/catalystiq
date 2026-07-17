@@ -73,7 +73,11 @@ def _vpt_series(df: pd.DataFrame) -> pd.Series:
 
 
 def _obv_series(df: pd.DataFrame) -> pd.Series:
-    direction = np.sign(df["close"].diff()).fillna(0)
+    """On-balance volume, standard convention: the first bar's volume is
+    the OBV base (OBV[0] = volume[0]) - see analysis/indicators.py's
+    _obv_series() for the reference-validation finding this matches."""
+    direction = np.sign(df["close"].diff())
+    direction.iloc[0] = 1
     return (direction * df["volume"]).cumsum()
 
 

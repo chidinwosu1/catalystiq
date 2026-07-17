@@ -86,6 +86,7 @@ from catalystiq.schemas.risk import RiskSnapshot
 from catalystiq.schemas.validation import DataQualityIssueType, DataQualityReport
 from catalystiq.schemas.volume_liquidity import VolumeLiquiditySnapshot
 from catalystiq.validation.data_quality import validate_price_history
+from catalystiq.validation.reference.anomaly import detect_anomalies
 
 DOMAIN = "market_price"
 DEFAULT_CALCULATION_VERSION = "1.0.0"
@@ -523,6 +524,26 @@ def get_silver_bars(symbol: str, db: Session) -> list[OHLCVBar]:
     ]
 
 
+def get_silver_bars_for_build(silver_build_run_id: int, db: Session) -> list[OHLCVBar]:
+    """Reads the immutable SilverBuildRunBar snapshot for a specific build
+    - unlike get_silver_bars() (the live current-state table), this
+    reproduces exactly what THAT build wrote, even if later builds have
+    since changed the live table. Used by the reference-calculation
+    adapter (catalystiq/validation/reference/comparator.py) so a
+    reference check always runs against the same inputs the original Gold
+    calculation used, regardless of when the check actually runs."""
+    rows = (
+        db.query(models.SilverBuildRunBar)
+        .filter_by(silver_build_run_id=silver_build_run_id)
+        .order_by(models.SilverBuildRunBar.bar_date)
+        .all()
+    )
+    return [
+        OHLCVBar(date=r.bar_date, open=r.open, high=r.high, low=r.low, close=r.close, volume=r.volume)
+        for r in rows
+    ]
+
+
 def get_latest_silver_build_run(symbol: str, db: Session) -> models.SilverBuildRun | None:
     """The current (most recent usable) SilverBuildRun for `symbol` -
     "usable" meaning succeeded or partial (a partial build's non-malformed
@@ -733,6 +754,14 @@ def _persist_gold(
     extra_fields: dict | None = None,
 ) -> None:
     now = _now()
+
+    # Cheap, generic sanity check (NaN/inf/implausible magnitude) - no
+    # reference library call. A trip hands the run off to the async
+    # reference-validation loop instead of blocking this response; see
+    # catalystiq/validation/reference/anomaly.py and .../scheduler.py.
+    if detect_anomalies(payload):
+        gold_run.flagged_for_reference_check = True
+
     fields = {
         "payload": payload,
         "data_quality_status": "available",

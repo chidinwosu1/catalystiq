@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     # (the Vite dev server). Comma-separated.
     cors_allow_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
+    # Reference-calculation adapter (catalystiq/validation/reference/):
+    # fraction of recently-succeeded Gold calculation runs the async
+    # validation loop samples for reference checking each cycle, on top of
+    # every run the synchronous anomaly check has already flagged.
+    reference_validation_sample_rate: float = 0.05
+    reference_validation_interval_seconds: int = 300
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -130,4 +130,4 @@ def test_obv_direction_matches_close_moves():
 
     obv = _reading(snap, "obv")
     assert obv.status == "computed"
-    assert obv.value == 200.0  # 0 + 500 - 300
+    assert obv.value == 1200.0  # 1000 (first bar's volume is the OBV base) + 500 - 300

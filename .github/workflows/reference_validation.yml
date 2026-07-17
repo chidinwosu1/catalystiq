@@ -1,0 +1,67 @@
+name: Reference Validation
+
+# Runs the reference-calculation adapter's own test suite
+# (catalystiq/validation/reference/) - cross-checking Catalyst IQ's
+# indicator formulas against TA-Lib, TradingView-formula, and independent
+# financial-statistics reference implementations. This is deliberately
+# separate from - and never runs as part of - the synchronous user-request
+# path; see catalystiq/validation/reference/scheduler.py for where the
+# same checks run in production (async, sampled).
+#
+# Triggers:
+#   - push/PR touching an indicator implementation or its configuration
+#     (catalystiq/analysis/**) or the reference adapter itself
+#     (catalystiq/validation/reference/**).
+#   - workflow_dispatch: run this manually before promoting any product's
+#     calculation_version (bumping DEFAULT_CALCULATION_VERSION or a
+#     module's _CALC_VERSION constant) - this repo has no other release-
+#     management gate, so this manual run is the promotion checkpoint.
+
+on:
+  push:
+    paths:
+      - "catalystiq/analysis/**"
+      - "catalystiq/validation/reference/**"
+      - "catalystiq/pipelines/market_price_pipeline.py"
+      - "requirements.txt"
+      - ".github/workflows/reference_validation.yml"
+  pull_request:
+    paths:
+      - "catalystiq/analysis/**"
+      - "catalystiq/validation/reference/**"
+      - "catalystiq/pipelines/market_price_pipeline.py"
+      - "requirements.txt"
+  workflow_dispatch:
+
+jobs:
+  reference-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # TA-Lib==0.7.1 (pinned in requirements.txt) ships a prebuilt
+          # manylinux wheel with the C library bundled - no apt/system
+          # package needed, unlike older TA-Lib releases.
+          pip install -r requirements.txt
+
+      - name: Run reference-validation test suite
+        env:
+          ACTION_API_KEY: ci-test-key
+        run: |
+          python -m pytest \
+            tests/test_analysis_config.py \
+            tests/test_freshness_policy.py \
+            tests/test_composite_reference_scenarios.py \
+            tests/test_reference_talib_adapter.py \
+            tests/test_reference_tradingview_formulas.py \
+            tests/test_reference_independent_stats.py \
+            tests/test_reference_comparator.py \
+            tests/test_reference_validation_scheduler.py \
+            -v

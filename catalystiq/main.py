@@ -10,15 +10,27 @@ from catalystiq.db.base import SessionLocal
 from catalystiq.providers.broker import BrokerError, get_broker_provider
 from catalystiq.routers import analysis, broker, market_data
 from catalystiq.scheduler import scheduler_loop
+from catalystiq.validation.reference.scheduler import reference_validation_loop
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(scheduler_loop(SessionLocal, get_broker_provider))
+    settings = get_settings()
+    tasks = [
+        asyncio.create_task(scheduler_loop(SessionLocal, get_broker_provider)),
+        asyncio.create_task(
+            reference_validation_loop(
+                SessionLocal,
+                settings.reference_validation_sample_rate,
+                settings.reference_validation_interval_seconds,
+            )
+        ),
+    ]
     try:
         yield
     finally:
-        task.cancel()
+        for task in tasks:
+            task.cancel()
 
 
 app = FastAPI(

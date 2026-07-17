@@ -255,6 +255,13 @@ class GoldCalculationRun(Base):
     started_at: Mapped[dt.datetime] = mapped_column(DateTime)
     completed_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime)
+    # Set by the synchronous anomaly sanity check right after this run's
+    # Gold row is persisted (NaN/inf/implausible-magnitude bounds - no
+    # reference library involved). The async reference-validation loop
+    # (catalystiq/validation/reference/scheduler.py) processes every
+    # flagged run before sampling others.
+    flagged_for_reference_check: Mapped[bool] = mapped_column(default=False, index=True)
+    reference_checked_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class GoldCalculationRunDependency(Base):
@@ -276,6 +283,41 @@ class GoldCalculationRunDependency(Base):
         ForeignKey("silver_build_run.id"), nullable=True
     )
     silver_record_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class GoldReferenceCheck(Base):
+    """Audit trail for the reference-calculation adapter
+    (catalystiq/validation/reference/): one row per indicator per check
+    run. Symbol/timestamps/silver build id/calculation version/
+    configuration version are all derivable via `gold_calculation_run_id`
+    (the existing source of truth for that lineage) rather than duplicated
+    here. A `status="fail"` row is never accompanied by silently
+    overwriting the Gold output - see market_price_pipeline.py's
+    quarantine handling, which sets the affected gold_* row's
+    data_quality_status to "quarantined" instead."""
+
+    __tablename__ = "gold_reference_check"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    gold_calculation_run_id: Mapped[int] = mapped_column(
+        ForeignKey("gold_calculation_run.id"), index=True
+    )
+    ticker_id: Mapped[int] = mapped_column(ForeignKey("tickers.id"), index=True)
+    indicator_name: Mapped[str] = mapped_column(String(100), index=True)
+    reference_source: Mapped[str] = mapped_column(String(30))  # talib | tradingview_formula | independent_stats
+    reference_library: Mapped[str] = mapped_column(String(50))
+    reference_library_version: Mapped[str] = mapped_column(String(20))
+    parameters: Mapped[dict] = mapped_column(JSON)
+    expected_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    actual_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    absolute_diff: Mapped[float | None] = mapped_column(Float, nullable=True)
+    relative_diff: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tolerance_abs: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tolerance_rel: Mapped[float | None] = mapped_column(Float, nullable=True)
+    warmup_bars_excluded: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(20), index=True)  # pass | fail | not_applicable
+    discrepancy_reason: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    checked_at: Mapped[dt.datetime] = mapped_column(DateTime)
 
 
 class TechnicalSnapshotRecord(Base):
