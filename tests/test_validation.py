@@ -6,6 +6,7 @@ from catalystiq.schemas.validation import DataQualityIssueType
 from catalystiq.validation.data_quality import (
     check_chronological_order,
     check_history_depth,
+    check_ohlc_relationships,
     cross_check_live_quote,
     dedupe_bars,
     flag_abnormal_gaps,
@@ -121,6 +122,44 @@ def test_cross_check_live_quote_skips_when_no_previous_close():
     quote = Quote(symbol="TEST", price=100.4, previous_close=None, as_of=dt.datetime.now(dt.timezone.utc))
 
     assert cross_check_live_quote(bars, quote) == []
+
+
+def test_check_ohlc_relationships_passes_valid_bars():
+    days = business_days(dt.date(2024, 1, 2), 5)
+    bars = [make_bar(d, 100 + i) for i, d in enumerate(days)]
+
+    assert check_ohlc_relationships(bars) == []
+
+
+def test_check_ohlc_relationships_flags_open_outside_range():
+    d = dt.date(2024, 1, 2)
+    bad = OHLCVBar(date=d, open=110, high=105, low=95, close=100, volume=1_000_000)
+
+    issues = check_ohlc_relationships([bad])
+
+    assert len(issues) == 1
+    assert issues[0].type == DataQualityIssueType.INVALID_OHLC_RELATIONSHIP
+    assert issues[0].date == d
+
+
+def test_check_ohlc_relationships_flags_close_outside_range():
+    d = dt.date(2024, 1, 2)
+    bad = OHLCVBar(date=d, open=100, high=105, low=95, close=120, volume=1_000_000)
+
+    issues = check_ohlc_relationships([bad])
+
+    assert len(issues) == 1
+    assert issues[0].type == DataQualityIssueType.INVALID_OHLC_RELATIONSHIP
+
+
+def test_check_ohlc_relationships_flags_low_greater_than_high():
+    d = dt.date(2024, 1, 2)
+    bad = OHLCVBar(date=d, open=100, high=95, low=105, close=100, volume=1_000_000)
+
+    issues = check_ohlc_relationships([bad])
+
+    assert len(issues) == 1
+    assert issues[0].type == DataQualityIssueType.INVALID_OHLC_RELATIONSHIP
 
 
 def test_check_history_depth_flags_thin_history():

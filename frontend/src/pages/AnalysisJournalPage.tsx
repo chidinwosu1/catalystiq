@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Loader2, Plus } from "lucide-react";
-import { ApiError, getQuote, type Quote } from "../lib/api";
+import {
+  ApiError,
+  getQuote,
+  getTechnicalSnapshot,
+  type IndicatorReading,
+  type Quote,
+  type TechnicalSnapshot,
+} from "../lib/api";
 import SectionCard from "../components/SectionCard";
 import StatTile from "../components/StatTile";
 import DemoBadge from "../components/DemoBadge";
@@ -55,6 +62,54 @@ function emptyDraft(ticker: string): Omit<JournalEntry, "id"> {
   };
 }
 
+// SetupSnapshot fields superseded by real, computed values in the Technical
+// Indicators section below (rsi/macd/movingAverages/volatility/volume).
+const REPLACED_SETUP_KEYS = new Set(["rsi", "macd", "movingAverages", "volatility", "volume"]);
+
+const INDICATOR_LABELS: Record<string, string> = {
+  sma_20: "20-day SMA",
+  sma_50: "50-day SMA",
+  sma_100: "100-day SMA",
+  sma_200: "200-day SMA",
+  price_vs_sma_50_pct: "Price vs. 50-day SMA",
+  sma_50_slope_10d_pct: "50-day SMA slope (10d)",
+  rsi_14: "RSI (14)",
+  macd_line: "MACD line",
+  macd_signal: "MACD signal",
+  macd_histogram: "MACD histogram",
+  bollinger_percent_b: "Bollinger %B",
+  bollinger_bandwidth_pct: "Bollinger bandwidth",
+  atr_14: "ATR (14)",
+  atr_14_pct: "ATR (14), % of price",
+  realized_volatility_20d_annualized_pct: "Realized volatility (20d, annualized)",
+  relative_volume_20d_pct: "Relative volume (20d)",
+  obv: "On-balance volume",
+};
+
+function ordinal(n: number): string {
+  const rounded = Math.round(n);
+  const suffixes = ["th", "st", "nd", "rd"];
+  const v = rounded % 100;
+  return `${rounded}${suffixes[(v - 20) % 10] ?? suffixes[v] ?? suffixes[0]}`;
+}
+
+function formatIndicatorValue(reading: IndicatorReading): string {
+  if (reading.status === "insufficient_data" || reading.value === null) {
+    return `Insufficient history (needs ${reading.min_bars_required}+ bars)`;
+  }
+  const v = reading.value;
+  if (reading.name.startsWith("sma_") || reading.name.startsWith("macd_") || reading.name === "atr_14") {
+    return money(v);
+  }
+  if (reading.name === "obv") {
+    return v.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  }
+  if (reading.name.endsWith("_pct")) {
+    return `${v.toFixed(2)}%`;
+  }
+  return v.toFixed(1);
+}
+
 export default function AnalysisJournalPage({
   initialSymbol,
   onTrade,
@@ -64,6 +119,10 @@ export default function AnalysisJournalPage({
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteError, setQuoteError] = useState<ApiError | null>(null);
+
+  const [technical, setTechnical] = useState<TechnicalSnapshot | null>(null);
+  const [technicalLoading, setTechnicalLoading] = useState(false);
+  const [technicalError, setTechnicalError] = useState<ApiError | null>(null);
 
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [draft, setDraft] = useState(emptyDraft(symbol));
@@ -89,6 +148,24 @@ export default function AnalysisJournalPage({
         setQuoteError(err instanceof ApiError ? err : new ApiError(0, "Unexpected error."));
       })
       .finally(() => !cancelled && setQuoteLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol]);
+
+  useEffect(() => {
+    if (!symbol) return;
+    let cancelled = false;
+    setTechnicalLoading(true);
+    setTechnicalError(null);
+    getTechnicalSnapshot(symbol)
+      .then((snap) => !cancelled && setTechnical(snap))
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setTechnical(null);
+        setTechnicalError(err instanceof ApiError ? err : new ApiError(0, "Unexpected error."));
+      })
+      .finally(() => !cancelled && setTechnicalLoading(false));
     return () => {
       cancelled = true;
     };
@@ -165,7 +242,7 @@ export default function AnalysisJournalPage({
       <SectionCard
         title="Stock Analysis"
         action={<DemoBadge />}
-        description="Price is real; setup indicators and scores are illustrative until the analytical engine is built"
+        description="Price and the Technical Indicators section below are real. Rating, probability, confidence, and the remaining setup fields are illustrative until the full scoring model is built."
       >
         <input
           type="text"
@@ -204,14 +281,16 @@ export default function AnalysisJournalPage({
         </div>
 
         <div className="mt-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
-          {Object.entries(demoSetup).map(([key, value]) => (
-            <div key={key} className="rounded-lg border border-border px-3 py-2">
-              <p className="uppercase tracking-wide text-ink-muted">
-                {key.replace(/([A-Z])/g, " $1")}
-              </p>
-              <p className="mt-0.5 text-ink-primary">{value}</p>
-            </div>
-          ))}
+          {Object.entries(demoSetup)
+            .filter(([key]) => !REPLACED_SETUP_KEYS.has(key))
+            .map(([key, value]) => (
+              <div key={key} className="rounded-lg border border-border px-3 py-2">
+                <p className="uppercase tracking-wide text-ink-muted">
+                  {key.replace(/([A-Z])/g, " $1")}
+                </p>
+                <p className="mt-0.5 text-ink-primary">{value}</p>
+              </div>
+            ))}
         </div>
 
         <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -226,6 +305,54 @@ export default function AnalysisJournalPage({
         >
           Trade {symbol}
         </button>
+      </SectionCard>
+
+      <SectionCard
+        title="Technical Indicators"
+        description="Real, computed from live price history - no invented numbers. Fields show &quot;Insufficient history&quot; instead of a guess when there isn't enough data yet."
+      >
+        {technicalLoading && (
+          <div className="flex items-center gap-2 text-sm text-ink-secondary">
+            <Loader2 size={14} className="animate-spin" /> Computing indicators…
+          </div>
+        )}
+        {technicalError && (
+          <div className="flex items-start gap-2 rounded-lg border border-status-critical/40 bg-status-critical-soft px-3 py-2 text-xs text-status-critical">
+            <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+            <span>{technicalError.message}</span>
+          </div>
+        )}
+        {technical && (
+          <>
+            {technical.warnings.length > 0 && (
+              <div className="mb-3 flex items-start gap-2 rounded-lg border border-status-warning/40 bg-status-warning-soft px-3 py-2 text-xs text-status-warning">
+                <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                <span>{technical.warnings.join(" ")}</span>
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-3 lg:grid-cols-4">
+              {technical.indicators.map((reading) => (
+                <div key={reading.name} className="rounded-lg border border-border px-3 py-2">
+                  <p className="uppercase tracking-wide text-ink-muted">
+                    {INDICATOR_LABELS[reading.name] ?? reading.name}
+                  </p>
+                  <p
+                    className={`mt-0.5 ${
+                      reading.status === "insufficient_data" ? "text-ink-muted" : "text-ink-primary"
+                    }`}
+                  >
+                    {formatIndicatorValue(reading)}
+                  </p>
+                  {reading.percentile_5y !== null && (
+                    <p className="mt-0.5 text-[11px] text-ink-muted">
+                      {ordinal(reading.percentile_5y)} percentile (5y)
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </SectionCard>
 
       <BehavioralAnalysisTable

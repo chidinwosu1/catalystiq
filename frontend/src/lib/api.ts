@@ -131,6 +131,28 @@ export interface ScheduledOrderRecord {
   created_at: string;
 }
 
+export type IndicatorStatus = "computed" | "insufficient_data";
+
+export interface IndicatorReading {
+  name: string;
+  status: IndicatorStatus;
+  value: number | null;
+  description: string;
+  params: Record<string, number>;
+  min_bars_required: number;
+  percentile_5y: number | null;
+  zscore_5y: number | null;
+}
+
+export interface TechnicalSnapshot {
+  symbol: string;
+  as_of: string;
+  bars_used: number;
+  history_days_available: number;
+  indicators: IndicatorReading[];
+  warnings: string[];
+}
+
 export class ApiError extends Error {
   status: number;
 
@@ -185,6 +207,10 @@ export function ingestPriceHistory(symbol: string, days = 365 * 5): Promise<Data
 
 export function getFundamentals(symbol: string): Promise<FundamentalsSnapshot> {
   return request(`/market-data/fundamentals/${encodeURIComponent(symbol)}`);
+}
+
+export function getTechnicalSnapshot(symbol: string, days = 365 * 5): Promise<TechnicalSnapshot> {
+  return request(`/analysis/technical/${encodeURIComponent(symbol)}?days=${days}`);
 }
 
 export function getAccount(): Promise<AccountInfo> {

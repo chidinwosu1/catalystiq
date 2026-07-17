@@ -1,10 +1,10 @@
 """Data Validation Layer (§2.9).
 
 Runs before any analysis module: verifies chronological order, dedupes
-rows, flags missing trading days, flags abnormal price gaps, and
-cross-checks the latest historical close against the live quote. The
-result is surfaced as a data-quality banner in the UI when checks fail
-(§10.4 "Data-quality warning").
+rows, checks OHLC internal consistency, flags missing trading days, flags
+abnormal price gaps, and cross-checks the latest historical close against
+the live quote. The result is surfaced as a data-quality banner in the UI
+when checks fail (§10.4 "Data-quality warning").
 """
 from __future__ import annotations
 
@@ -56,6 +56,44 @@ def dedupe_bars(bars: Sequence[OHLCVBar]) -> tuple[list[OHLCVBar], list[DataQual
             continue
         seen[bar.date] = bar
     return list(seen.values()), issues
+
+
+def check_ohlc_relationships(bars: Sequence[OHLCVBar]) -> list[DataQualityIssue]:
+    """Flags rows violating low <= open <= high and low <= close <= high (§6.3)."""
+    issues = []
+    for bar in bars:
+        if bar.low > bar.high:
+            issues.append(
+                DataQualityIssue(
+                    type=DataQualityIssueType.INVALID_OHLC_RELATIONSHIP,
+                    date=bar.date,
+                    detail=f"Low ({bar.low}) is greater than high ({bar.high}) on {bar.date}.",
+                )
+            )
+            continue
+        if not (bar.low <= bar.open <= bar.high):
+            issues.append(
+                DataQualityIssue(
+                    type=DataQualityIssueType.INVALID_OHLC_RELATIONSHIP,
+                    date=bar.date,
+                    detail=(
+                        f"Open ({bar.open}) is outside the [low, high] range "
+                        f"([{bar.low}, {bar.high}]) on {bar.date}."
+                    ),
+                )
+            )
+        if not (bar.low <= bar.close <= bar.high):
+            issues.append(
+                DataQualityIssue(
+                    type=DataQualityIssueType.INVALID_OHLC_RELATIONSHIP,
+                    date=bar.date,
+                    detail=(
+                        f"Close ({bar.close}) is outside the [low, high] range "
+                        f"([{bar.low}, {bar.high}]) on {bar.date}."
+                    ),
+                )
+            )
+    return issues
 
 
 def flag_missing_trading_days(
@@ -205,6 +243,7 @@ def validate_price_history(
     issues += dedupe_issues
     cleaned.sort(key=lambda b: b.date)
 
+    issues += check_ohlc_relationships(cleaned)
     issues += flag_missing_trading_days(cleaned, calendar_name)
     issues += flag_abnormal_gaps(cleaned)
     issues += cross_check_live_quote(cleaned, live_quote)

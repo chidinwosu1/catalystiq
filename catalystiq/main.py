@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from catalystiq.config import get_settings
 from catalystiq.db.base import SessionLocal
 from catalystiq.providers.broker import BrokerError, get_broker_provider
-from catalystiq.routers import broker, market_data
+from catalystiq.routers import analysis, broker, market_data
 from catalystiq.scheduler import scheduler_loop
 
 
@@ -36,6 +36,7 @@ app.add_middleware(
 
 app.include_router(broker.router)
 app.include_router(market_data.router)
+app.include_router(analysis.router)
 
 
 @app.exception_handler(BrokerError)

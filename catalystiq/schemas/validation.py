@@ -14,6 +14,7 @@ class DataQualityIssueType(str, Enum):
     ABNORMAL_GAP = "abnormal_gap"
     LIVE_QUOTE_MISMATCH = "live_quote_mismatch"
     THIN_HISTORY = "thin_history"
+    INVALID_OHLC_RELATIONSHIP = "invalid_ohlc_relationship"
 
 
 class DataQualityIssue(BaseModel):
