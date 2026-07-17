@@ -7,6 +7,7 @@ shape.
 """
 from __future__ import annotations
 
+import datetime as dt
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
@@ -78,3 +79,26 @@ class Position(BaseModel):
     unrealized_plpc: str
     current_price: str
     change_today: str
+
+
+class ScheduledOrderCreate(BaseModel):
+    order: NewOrder
+    scheduled_at: dt.datetime
+
+    @model_validator(mode="after")
+    def validate_future(self):
+        now = dt.datetime.now(self.scheduled_at.tzinfo or dt.timezone.utc)
+        if self.scheduled_at <= now:
+            raise ValueError("scheduled_at must be in the future.")
+        return self
+
+
+class ScheduledOrderRecord(BaseModel):
+    id: int
+    symbol: str
+    order: NewOrder
+    scheduled_at: dt.datetime
+    status: Literal["pending", "submitted", "failed", "cancelled"]
+    broker_order_id: Optional[str] = None
+    error_detail: Optional[str] = None
+    created_at: dt.datetime

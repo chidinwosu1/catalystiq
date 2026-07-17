@@ -118,6 +118,19 @@ export interface NewOrder {
   stop_loss_price?: number;
 }
 
+export type ScheduledOrderStatus = "pending" | "submitted" | "failed" | "cancelled";
+
+export interface ScheduledOrderRecord {
+  id: number;
+  symbol: string;
+  order: NewOrder;
+  scheduled_at: string;
+  status: ScheduledOrderStatus;
+  broker_order_id: string | null;
+  error_detail: string | null;
+  created_at: string;
+}
+
 export class ApiError extends Error {
   status: number;
 
@@ -196,4 +209,23 @@ export function submitOrder(order: NewOrder): Promise<Record<string, unknown>> {
 
 export function cancelOrder(orderId: string): Promise<Record<string, unknown>> {
   return request(`/paper/orders/${encodeURIComponent(orderId)}`, { method: "DELETE" });
+}
+
+export function scheduleOrder(
+  order: NewOrder,
+  scheduledAt: Date
+): Promise<ScheduledOrderRecord> {
+  return request("/paper/scheduled-orders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ order, scheduled_at: scheduledAt.toISOString() }),
+  });
+}
+
+export function getScheduledOrders(): Promise<ScheduledOrderRecord[]> {
+  return request("/paper/scheduled-orders");
+}
+
+export function cancelScheduledOrder(id: number): Promise<ScheduledOrderRecord> {
+  return request(`/paper/scheduled-orders/${id}`, { method: "DELETE" });
 }

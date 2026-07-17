@@ -8,6 +8,8 @@ import RatingBadge from "../components/RatingBadge";
 import ProbabilityBar from "../components/ProbabilityBar";
 import ConfidenceMeter from "../components/ConfidenceMeter";
 import { getDemoAnalysis, getDemoSetup } from "../mockAnalysisDetail";
+import BehavioralAnalysisTable from "../components/BehavioralAnalysisTable";
+import { getStockBehavioralAnalysis } from "../mockBehavioralData";
 
 interface AnalysisJournalPageProps {
   initialSymbol: string;
@@ -94,6 +96,7 @@ export default function AnalysisJournalPage({
 
   const demoAnalysis = useMemo(() => getDemoAnalysis(symbol), [symbol]);
   const demoSetup = useMemo(() => getDemoSetup(symbol), [symbol]);
+  const demoBehavioral = useMemo(() => getStockBehavioralAnalysis(symbol), [symbol]);
 
   function handleSymbolSubmit(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key !== "Enter") return;
@@ -224,6 +227,12 @@ export default function AnalysisJournalPage({
           Trade {symbol}
         </button>
       </SectionCard>
+
+      <BehavioralAnalysisTable
+        title={`Investor Functional Behavior Analysis — ${symbol}`}
+        description="How investors are likely to react to this ticker's recent triggers, and what would push that reaction positively or negatively"
+        rows={demoBehavioral}
+      />
 
       <SectionCard
         title="Trade Journal"

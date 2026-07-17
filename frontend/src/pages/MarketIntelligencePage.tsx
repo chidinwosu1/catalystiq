@@ -2,7 +2,9 @@ import { TrendingDown, TrendingUp } from "lucide-react";
 import SectionCard from "../components/SectionCard";
 import DemoBadge from "../components/DemoBadge";
 import RatingBadge from "../components/RatingBadge";
+import BehavioralAnalysisTable from "../components/BehavioralAnalysisTable";
 import { catalysts, dailyWatchlist, marketOverview, sectorRotation } from "../mockMarketData";
+import { marketWideBehavioralAnalysis } from "../mockBehavioralData";
 import type { Rating } from "../types";
 
 interface MarketIntelligencePageProps {
@@ -24,7 +26,7 @@ export default function MarketIntelligencePage({
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-ink-primary">Market Intelligence</h1>
+          <h1 className="text-xl font-semibold text-ink-primary">Market Analysis</h1>
           <p className="mt-1 text-sm text-ink-secondary">
             Daily macro dashboard - sector rankings, catalysts, and the watchlist below use
             illustrative demo data until the Market Environment / Sector / News modules are
@@ -57,7 +59,7 @@ export default function MarketIntelligencePage({
         </div>
       </SectionCard>
 
-      <SectionCard title="Sector Rotation" description="Ranked strongest to weakest by leadership score">
+      <SectionCard title="Industry Sector Ranking" description="Ranked strongest to weakest by leadership score">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-left text-sm">
             <thead>
@@ -122,6 +124,12 @@ export default function MarketIntelligencePage({
           ))}
         </ul>
       </SectionCard>
+
+      <BehavioralAnalysisTable
+        title="Investor Functional Behavior Analysis"
+        description="Market-wide, mapped to the catalysts above - how investors are likely to react, and what would push that reaction positively or negatively"
+        rows={marketWideBehavioralAnalysis}
+      />
 
       <SectionCard title="Daily Watchlist">
         <div className="overflow-x-auto">

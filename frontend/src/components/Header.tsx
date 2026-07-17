@@ -22,7 +22,9 @@ export default function Header({ activePage, onNavigate, onSearch }: HeaderProps
   return (
     <header className="border-b border-border bg-page/80 backdrop-blur">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-4">
-        <Logo size="md" />
+        <button onClick={() => onNavigate("home")} aria-label="Go to home">
+          <Logo size="md" />
+        </button>
 
         <nav className="hidden items-center gap-1 md:flex" role="tablist" aria-label="Sections">
           {PAGES.map((page) => (

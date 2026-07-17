@@ -1,14 +1,30 @@
+import asyncio
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from catalystiq.config import get_settings
-from catalystiq.providers.broker import BrokerError
+from catalystiq.db.base import SessionLocal
+from catalystiq.providers.broker import BrokerError, get_broker_provider
 from catalystiq.routers import broker, market_data
+from catalystiq.scheduler import scheduler_loop
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = asyncio.create_task(scheduler_loop(SessionLocal, get_broker_provider))
+    try:
+        yield
+    finally:
+        task.cancel()
+
 
 app = FastAPI(
     title="Catalyst IQ API",
     version="0.2.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

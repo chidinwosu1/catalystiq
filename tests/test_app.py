@@ -149,3 +149,72 @@ def test_ingest_price_history_is_idempotent_on_rerun(client, test_db_session):
         assert row_count == len(bars)
     finally:
         del app.dependency_overrides[get_market_data_provider]
+
+
+def _future_iso(minutes: int = 30) -> str:
+    when = dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=minutes)
+    return when.isoformat()
+
+
+def test_create_scheduled_order_persists_pending(client):
+    payload = {
+        "order": {"symbol": "aapl", "side": "buy", "type": "market", "qty": 5},
+        "scheduled_at": _future_iso(),
+    }
+    r = client.post("/paper/scheduled-orders", json=payload)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["symbol"] == "AAPL"
+    assert body["status"] == "pending"
+    assert body["order"]["qty"] == 5
+
+
+def test_create_scheduled_order_rejects_past_time(client):
+    payload = {
+        "order": {"symbol": "aapl", "side": "buy", "type": "market", "qty": 5},
+        "scheduled_at": _future_iso(-30),
+    }
+    r = client.post("/paper/scheduled-orders", json=payload)
+    assert r.status_code == 422
+
+
+def test_list_scheduled_orders_returns_created(client):
+    payload = {
+        "order": {"symbol": "msft", "side": "sell", "type": "market", "qty": 2},
+        "scheduled_at": _future_iso(),
+    }
+    client.post("/paper/scheduled-orders", json=payload)
+
+    r = client.get("/paper/scheduled-orders")
+    assert r.status_code == 200
+    symbols = [row["symbol"] for row in r.json()]
+    assert "MSFT" in symbols
+
+
+def test_cancel_scheduled_order(client):
+    payload = {
+        "order": {"symbol": "nvda", "side": "buy", "type": "market", "qty": 1},
+        "scheduled_at": _future_iso(),
+    }
+    created = client.post("/paper/scheduled-orders", json=payload).json()
+
+    r = client.delete(f"/paper/scheduled-orders/{created['id']}")
+    assert r.status_code == 200
+    assert r.json()["status"] == "cancelled"
+
+
+def test_cancel_already_cancelled_scheduled_order_conflicts(client):
+    payload = {
+        "order": {"symbol": "nvda", "side": "buy", "type": "market", "qty": 1},
+        "scheduled_at": _future_iso(),
+    }
+    created = client.post("/paper/scheduled-orders", json=payload).json()
+    client.delete(f"/paper/scheduled-orders/{created['id']}")
+
+    r = client.delete(f"/paper/scheduled-orders/{created['id']}")
+    assert r.status_code == 409
+
+
+def test_cancel_unknown_scheduled_order_404s(client):
+    r = client.delete("/paper/scheduled-orders/999999")
+    assert r.status_code == 404

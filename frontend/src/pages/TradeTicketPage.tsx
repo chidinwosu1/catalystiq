@@ -1,11 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, ChevronDown, Loader2 } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  Clock,
+  Loader2,
+  X,
+} from "lucide-react";
 import {
   ApiError,
+  cancelScheduledOrder,
   getAccount,
   getFundamentals,
   getPositions,
   getQuote,
+  getScheduledOrders,
+  scheduleOrder,
   submitOrder,
   type AccountInfo,
   type FundamentalsSnapshot,
@@ -13,6 +23,7 @@ import {
   type OrderType,
   type Position,
   type Quote,
+  type ScheduledOrderRecord,
   type TimeInForce,
 } from "../lib/api";
 import SectionCard from "../components/SectionCard";
@@ -21,6 +32,9 @@ interface TradeTicketPageProps {
   initialSymbol: string;
   onViewAnalysis: (symbol: string) => void;
 }
+
+type TradingStyle = "day" | "swing";
+type AssetType = "stocks" | "futures" | "options";
 
 const ORDER_TYPES: { id: OrderType; label: string; description: string }[] = [
   { id: "market", label: "Market", description: "Executes at the best available price" },
@@ -37,9 +51,38 @@ const TIF_OPTIONS: { id: TimeInForce; label: string }[] = [
   { id: "fok", label: "Fill or Kill" },
 ];
 
+const ASSET_TYPES: { id: AssetType; label: string; supported: boolean }[] = [
+  { id: "stocks", label: "Stocks", supported: true },
+  { id: "futures", label: "Futures", supported: false },
+  { id: "options", label: "Options", supported: false },
+];
+
+const DEFAULT_TIME_PERIOD: Record<TradingStyle, string> = {
+  day: "Same session",
+  swing: "2-10 days",
+};
+
 function money(n: number): string {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
+
+function formatCountdown(msRemaining: number): string {
+  if (msRemaining <= 0) return "Executing…";
+  const totalSeconds = Math.floor(msRemaining / 1000);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  if (h > 0) return `in ${h}h ${m}m ${s}s`;
+  if (m > 0) return `in ${m}m ${s}s`;
+  return `in ${s}s`;
+}
+
+const STATUS_CLASS: Record<string, string> = {
+  pending: "text-brand-blue",
+  submitted: "text-status-good",
+  failed: "text-status-critical",
+  cancelled: "text-ink-muted",
+};
 
 export default function TradeTicketPage({ initialSymbol, onViewAnalysis }: TradeTicketPageProps) {
   const [symbolInput, setSymbolInput] = useState(initialSymbol);
@@ -52,6 +95,10 @@ export default function TradeTicketPage({ initialSymbol, onViewAnalysis }: Trade
 
   const [account, setAccount] = useState<AccountInfo | null>(null);
   const [positions, setPositions] = useState<Position[]>([]);
+
+  const [tradingStyle, setTradingStyle] = useState<TradingStyle>("swing");
+  const [timePeriod, setTimePeriod] = useState(DEFAULT_TIME_PERIOD.swing);
+  const [assetType, setAssetType] = useState<AssetType>("stocks");
 
   const [side, setSide] = useState<"buy" | "sell">("buy");
   const [qty, setQty] = useState("10");
@@ -68,10 +115,16 @@ export default function TradeTicketPage({ initialSymbol, onViewAnalysis }: Trade
   const [stopLossPct, setStopLossPct] = useState("");
   const [extendedHours, setExtendedHours] = useState(false);
 
+  const [executionMode, setExecutionMode] = useState<"now" | "scheduled">("now");
+  const [scheduledAt, setScheduledAt] = useState("");
+  const [scheduledOrders, setScheduledOrders] = useState<ScheduledOrderRecord[]>([]);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+
   const [reviewing, setReviewing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<ApiError | null>(null);
   const [submitResult, setSubmitResult] = useState<Record<string, unknown> | null>(null);
+  const [scheduledResult, setScheduledResult] = useState<ScheduledOrderRecord | null>(null);
 
   useEffect(() => {
     setSymbolInput(initialSymbol);
@@ -85,6 +138,25 @@ export default function TradeTicketPage({ initialSymbol, onViewAnalysis }: Trade
     getPositions()
       .then(setPositions)
       .catch(() => setPositions([]));
+  }, []);
+
+  function refreshScheduledOrders() {
+    getScheduledOrders()
+      .then(setScheduledOrders)
+      .catch(() => {
+        /* non-fatal - the list section just stays empty */
+      });
+  }
+
+  useEffect(() => {
+    refreshScheduledOrders();
+    const interval = setInterval(refreshScheduledOrders, 10_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -124,6 +196,11 @@ export default function TradeTicketPage({ initialSymbol, onViewAnalysis }: Trade
     setSubmitResult(null);
     setSubmitError(null);
     setSymbol(symbolInput.trim().toUpperCase());
+  }
+
+  function handleTradingStyleChange(style: TradingStyle) {
+    setTradingStyle(style);
+    setTimePeriod(DEFAULT_TIME_PERIOD[style]);
   }
 
   const currentPosition = useMemo(
@@ -182,8 +259,15 @@ export default function TradeTicketPage({ initialSymbol, onViewAnalysis }: Trade
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const result = await submitOrder(buildOrder());
-      setSubmitResult(result);
+      if (executionMode === "scheduled") {
+        const when = new Date(scheduledAt);
+        const record = await scheduleOrder(buildOrder(), when);
+        setScheduledResult(record);
+        refreshScheduledOrders();
+      } else {
+        const result = await submitOrder(buildOrder());
+        setSubmitResult(result);
+      }
       setReviewing(false);
     } catch (error) {
       setSubmitError(error instanceof ApiError ? error : new ApiError(0, "Unexpected error."));
@@ -192,18 +276,34 @@ export default function TradeTicketPage({ initialSymbol, onViewAnalysis }: Trade
     }
   }
 
+  async function handleCancelScheduled(id: number) {
+    try {
+      await cancelScheduledOrder(id);
+      refreshScheduledOrders();
+    } catch {
+      // Non-fatal - the row's own status will just remain as-is until refresh.
+    }
+  }
+
+  const scheduledDate = executionMode === "scheduled" && scheduledAt ? new Date(scheduledAt) : null;
+  const scheduledValid = scheduledDate !== null && scheduledDate.getTime() > Date.now();
+
   const canReview =
     symbol.length > 0 &&
     qtyNum > 0 &&
+    assetType === "stocks" &&
     (orderType !== "limit" || parseFloat(limitPrice) > 0) &&
     (orderType !== "stop" || parseFloat(stopPrice) > 0) &&
     (orderType !== "stop_limit" || (parseFloat(limitPrice) > 0 && parseFloat(stopPrice) > 0)) &&
-    (orderType !== "trailing_stop" || parseFloat(trailPercent) > 0);
+    (orderType !== "trailing_stop" || parseFloat(trailPercent) > 0) &&
+    (executionMode !== "scheduled" || scheduledValid);
 
   const priceChangePct =
     quote && quote.previous_close
       ? ((quote.price - quote.previous_close) / quote.previous_close) * 100
       : null;
+
+  const pendingScheduled = scheduledOrders.filter((s) => s.status === "pending");
 
   return (
     <div className="mx-auto max-w-2xl space-y-5">
@@ -214,6 +314,60 @@ export default function TradeTicketPage({ initialSymbol, onViewAnalysis }: Trade
           simulation.
         </p>
       </div>
+
+      <SectionCard title="Trade Setup">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <p className="mb-1.5 text-xs text-ink-muted">Trading style</p>
+            <div className="flex rounded-lg border border-border p-1">
+              {(["day", "swing"] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => handleTradingStyleChange(s)}
+                  className={`flex-1 rounded-md py-1.5 text-sm font-medium capitalize transition-colors ${
+                    tradingStyle === s
+                      ? "bg-surface-2 text-ink-primary"
+                      : "text-ink-secondary hover:text-ink-primary"
+                  }`}
+                >
+                  {s} trading
+                </button>
+              ))}
+            </div>
+          </div>
+          <label className="text-xs text-ink-muted">
+            Time period
+            <input
+              type="text"
+              value={timePeriod}
+              onChange={(e) => setTimePeriod(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-ink-primary focus:border-brand-blue/50 focus:outline-none"
+            />
+          </label>
+        </div>
+
+        <div className="mt-3">
+          <p className="mb-1.5 text-xs text-ink-muted">Asset type</p>
+          <div className="flex gap-2">
+            {ASSET_TYPES.map((a) => (
+              <button
+                key={a.id}
+                disabled={!a.supported}
+                onClick={() => setAssetType(a.id)}
+                title={a.supported ? undefined : "Coming soon - not tradeable yet"}
+                className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                  assetType === a.id
+                    ? "border-brand-blue/50 bg-brand-blue/10 text-ink-primary"
+                    : "border-border text-ink-secondary hover:text-ink-primary"
+                } ${!a.supported ? "cursor-not-allowed opacity-40" : ""}`}
+              >
+                {a.label}
+                {!a.supported && " (soon)"}
+              </button>
+            ))}
+          </div>
+        </div>
+      </SectionCard>
 
       <SectionCard title="Ticker">
         <input
@@ -471,7 +625,49 @@ export default function TradeTicketPage({ initialSymbol, onViewAnalysis }: Trade
         )}
       </SectionCard>
 
-      {!reviewing && !submitResult && (
+      <SectionCard title="When" description="Execute immediately, or schedule for a specific time">
+        <div className="flex rounded-lg border border-border p-1">
+          {(["now", "scheduled"] as const).map((mode) => (
+            <button
+              key={mode}
+              onClick={() => setExecutionMode(mode)}
+              className={`flex-1 rounded-md py-1.5 text-sm font-medium transition-colors ${
+                executionMode === mode
+                  ? "bg-surface-2 text-ink-primary"
+                  : "text-ink-secondary hover:text-ink-primary"
+              }`}
+            >
+              {mode === "now" ? "Execute now" : "Schedule for later"}
+            </button>
+          ))}
+        </div>
+
+        {executionMode === "scheduled" && (
+          <div className="mt-3">
+            <label className="text-xs text-ink-muted">
+              Execution time
+              <input
+                type="datetime-local"
+                value={scheduledAt}
+                onChange={(e) => setScheduledAt(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-ink-primary focus:border-brand-blue/50 focus:outline-none"
+              />
+            </label>
+            {scheduledDate && (
+              <p
+                className={`mt-2 flex items-center gap-1.5 text-xs ${scheduledValid ? "text-brand-blue" : "text-status-critical"}`}
+              >
+                <Clock size={13} />
+                {scheduledValid
+                  ? `Will execute ${formatCountdown(scheduledDate.getTime() - nowTick)} (${scheduledDate.toLocaleString()})`
+                  : "Pick a time in the future"}
+              </p>
+            )}
+          </div>
+        )}
+      </SectionCard>
+
+      {!reviewing && !submitResult && !scheduledResult && (
         <div className="flex gap-3">
           <button
             disabled={!canReview}
@@ -498,7 +694,8 @@ export default function TradeTicketPage({ initialSymbol, onViewAnalysis }: Trade
           </p>
           <p className="mt-1 text-sm text-ink-secondary">
             {ORDER_TYPES.find((t) => t.id === orderType)?.label} order ·{" "}
-            {TIF_OPTIONS.find((t) => t.id === timeInForce)?.label}
+            {TIF_OPTIONS.find((t) => t.id === timeInForce)?.label} · {tradingStyle} trading (
+            {timePeriod})
           </p>
           <p className="mt-1 text-sm text-ink-secondary">
             Estimated value: {money(estimatedValue)}
@@ -511,6 +708,12 @@ export default function TradeTicketPage({ initialSymbol, onViewAnalysis }: Trade
           {stopLossPrice && (
             <p className="mt-1 text-sm text-status-critical">Stop loss: {money(stopLossPrice)}</p>
           )}
+          <p className="mt-1 flex items-center gap-1.5 text-sm text-ink-secondary">
+            <Clock size={13} />
+            {executionMode === "now"
+              ? "Executes immediately on submit"
+              : scheduledDate && `Scheduled for ${scheduledDate.toLocaleString()}`}
+          </p>
 
           {submitError && (
             <div className="mt-3 flex items-start gap-2 rounded-lg border border-status-critical/40 bg-status-critical-soft px-3 py-2 text-xs text-status-critical">
@@ -526,7 +729,7 @@ export default function TradeTicketPage({ initialSymbol, onViewAnalysis }: Trade
               className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
             >
               {submitting && <Loader2 size={14} className="animate-spin" />}
-              Submit Paper Trade
+              {executionMode === "now" ? "Submit Paper Trade" : "Schedule Paper Trade"}
             </button>
             <button
               onClick={() => setReviewing(false)}
@@ -553,6 +756,58 @@ export default function TradeTicketPage({ initialSymbol, onViewAnalysis }: Trade
           >
             Place another order
           </button>
+        </SectionCard>
+      )}
+
+      {scheduledResult && (
+        <SectionCard title="Order Scheduled">
+          <div className="flex items-start gap-2 text-sm text-brand-blue">
+            <Clock size={15} className="mt-0.5 shrink-0" />
+            <span>
+              Queued - the backend will submit it automatically at{" "}
+              {new Date(scheduledResult.scheduled_at).toLocaleString()}. See the pending list
+              below.
+            </span>
+          </div>
+          <button
+            onClick={() => setScheduledResult(null)}
+            className="mt-3 text-xs font-medium text-brand-blue hover:underline"
+          >
+            Place another order
+          </button>
+        </SectionCard>
+      )}
+
+      {pendingScheduled.length > 0 && (
+        <SectionCard title="Pending Scheduled Orders">
+          <div className="space-y-2">
+            {pendingScheduled.map((s) => {
+              const target = new Date(s.scheduled_at).getTime();
+              return (
+                <div
+                  key={s.id}
+                  className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5 text-sm"
+                >
+                  <div>
+                    <p className="font-medium text-ink-primary">
+                      {s.order.side === "buy" ? "Buy" : "Sell"} {s.order.qty ?? ""} {s.symbol}
+                    </p>
+                    <p className={`mt-0.5 flex items-center gap-1 text-xs ${STATUS_CLASS[s.status]}`}>
+                      <Clock size={12} />
+                      {formatCountdown(target - nowTick)} ({new Date(s.scheduled_at).toLocaleString()})
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => handleCancelScheduled(s.id)}
+                    aria-label="Cancel scheduled order"
+                    className="rounded-md p-1.5 text-ink-muted hover:bg-surface-2 hover:text-status-critical"
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
         </SectionCard>
       )}
     </div>

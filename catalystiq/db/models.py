@@ -138,6 +138,27 @@ class ReinforcementStat(Base):
     follow_through_rate: Mapped[float] = mapped_column(Float)
 
 
+class ScheduledOrder(Base):
+    """A trade order queued for future submission (§1.1 Execution Zone).
+
+    Executed by an in-process background loop (see catalystiq/main.py's
+    lifespan) that polls for due, pending rows and submits them through the
+    configured BrokerProvider. That loop only runs while this process is
+    alive - see the README for that limitation.
+    """
+
+    __tablename__ = "scheduled_orders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(15), index=True)
+    order_json: Mapped[dict] = mapped_column(JSON)
+    scheduled_at: Mapped[dt.datetime] = mapped_column(DateTime, index=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    broker_order_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+
 class Report(Base):
     __tablename__ = "reports"
 
