@@ -31,14 +31,51 @@ class Ticker(Base):
     sector: Mapped[str | None] = mapped_column(String(100), nullable=True)
     industry: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
-    price_history: Mapped[list["PriceHistory"]] = relationship(
+    price_history: Mapped[list["SilverPriceBar"]] = relationship(
         back_populates="ticker", cascade="all, delete-orphan"
     )
 
 
-class PriceHistory(Base):
-    __tablename__ = "price_history"
-    __table_args__ = (UniqueConstraint("ticker_id", "date", name="uq_price_history_ticker_date"),)
+# --- Bronze: source-aligned, minimally-transformed raw data. Append-only -
+# a routine re-ingest never overwrites a prior run's rows (no unique
+# constraint on ticker+date here; that's Silver's job). See
+# catalystiq/pipelines/market_price_pipeline.py's ingest_bronze().
+
+class BronzeIngestionRun(Base):
+    __tablename__ = "bronze_ingestion_run"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    domain: Mapped[str] = mapped_column(String(50), index=True)
+    symbol: Mapped[str] = mapped_column(String(15), index=True)
+    provider: Mapped[str] = mapped_column(String(50))
+    requested_at: Mapped[dt.datetime] = mapped_column(DateTime)
+    started_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="running", index=True)
+    bars_fetched: Mapped[int] = mapped_column(Integer, default=0)
+    error_detail: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+
+
+class BronzeMarketPriceBar(Base):
+    __tablename__ = "bronze_market_price_bar"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ingestion_run_id: Mapped[int] = mapped_column(ForeignKey("bronze_ingestion_run.id"), index=True)
+    ticker_id: Mapped[int] = mapped_column(ForeignKey("tickers.id"), index=True)
+    source_symbol: Mapped[str] = mapped_column(String(15))
+    bar_date: Mapped[dt.date] = mapped_column(index=True)
+    raw_payload: Mapped[dict] = mapped_column(JSON)
+    source_timestamp: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    ingested_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+
+# --- Silver: validated, deduplicated, normalized. Reads only from Bronze.
+# Unique on (ticker, date) - Silver IS the current-best-known clean view,
+# so upserting here on reprocessing is correct (unlike Bronze).
+
+class SilverPriceBar(Base):
+    __tablename__ = "silver_price_bar"
+    __table_args__ = (UniqueConstraint("ticker_id", "date", name="uq_silver_price_bar_ticker_date"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     ticker_id: Mapped[int] = mapped_column(ForeignKey("tickers.id"), index=True)
@@ -48,39 +85,69 @@ class PriceHistory(Base):
     low: Mapped[float] = mapped_column(Float)
     close: Mapped[float] = mapped_column(Float)
     volume: Mapped[int] = mapped_column(Integer)
+    source_bronze_ingestion_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("bronze_ingestion_run.id"), nullable=True
+    )
+    data_quality_status: Mapped[str] = mapped_column(String(20), default="clean")
+    remediation_actions: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime)
 
     ticker: Mapped["Ticker"] = relationship(back_populates="price_history")
 
 
-class IndicatorSnapshot(Base):
-    __tablename__ = "indicator_snapshots"
+class SilverPriceBarRejected(Base):
+    """Quarantine for Bronze rows that failed the Data Validation Layer
+    (§2.9) during build_silver() - rejected, not silently dropped."""
+
+    __tablename__ = "silver_price_bar_rejected"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticker_id: Mapped[int] = mapped_column(ForeignKey("tickers.id"), index=True)
+    source_bronze_market_price_bar_id: Mapped[int] = mapped_column(
+        ForeignKey("bronze_market_price_bar.id")
+    )
+    bar_date: Mapped[dt.date] = mapped_column(index=True)
+    rejection_reason: Mapped[str] = mapped_column(String(1000))
+    rejected_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+
+# --- Gold: curated analytical products, read only from Silver. Uniform
+# shape across all five products - id/ticker/date/calculation_version/
+# payload (the product's own Pydantic response, serialized)/lineage
+# columns. See catalystiq/pipelines/market_price_pipeline.py's
+# build_gold(). `Record` suffix avoids colliding with the Pydantic
+# response classes of the same name in catalystiq/schemas/*.py.
+
+class TechnicalSnapshotRecord(Base):
+    __tablename__ = "gold_technical_snapshot"
     __table_args__ = (
-        UniqueConstraint(
-            "ticker_id", "date", "indicator_name", name="uq_indicator_snapshot"
-        ),
+        UniqueConstraint("ticker_id", "date", "calculation_version", name="uq_gold_technical_snapshot"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     ticker_id: Mapped[int] = mapped_column(ForeignKey("tickers.id"), index=True)
     date: Mapped[dt.date] = mapped_column(index=True)
-    indicator_name: Mapped[str] = mapped_column(String(100), index=True)
-    value: Mapped[float] = mapped_column(Float)
-    percentile_5y: Mapped[float | None] = mapped_column(Float, nullable=True)
+    calculation_version: Mapped[str] = mapped_column(String(20))
+    payload: Mapped[dict] = mapped_column(JSON)
+    data_quality_status: Mapped[str] = mapped_column(String(20), default="available")
+    silver_record_count: Mapped[int] = mapped_column(Integer, default=0)
+    silver_date_range_start: Mapped[dt.date | None] = mapped_column(nullable=True)
+    silver_date_range_end: Mapped[dt.date | None] = mapped_column(nullable=True)
+    bronze_ingestion_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("bronze_ingestion_run.id"), nullable=True
+    )
+    source_provider: Mapped[str] = mapped_column(String(50))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime)
 
 
 class MarketStructureSnapshotRecord(Base):
-    """Persisted snapshot of the Market Structure data product (§6). Not yet
-    written by anything - the read path
-    (catalystiq/routers/analysis.py's /market-structure endpoint) is
-    stateless/live, matching IndicatorSnapshot above. Named with a
-    `Record` suffix to avoid colliding with
-    catalystiq.schemas.market_structure.MarketStructureSnapshot, the
-    Pydantic API response shape."""
+    """Persisted snapshot of the Market Structure data product (§6)."""
 
-    __tablename__ = "market_structure_snapshots"
+    __tablename__ = "gold_market_structure_snapshot"
     __table_args__ = (
         UniqueConstraint(
-            "ticker_id", "date", "calculation_version", name="uq_market_structure_snapshot"
+            "ticker_id", "date", "calculation_version", name="uq_gold_market_structure_snapshot"
         ),
     )
 
@@ -90,17 +157,22 @@ class MarketStructureSnapshotRecord(Base):
     calculation_version: Mapped[str] = mapped_column(String(20))
     payload: Mapped[dict] = mapped_column(JSON)
     data_quality_status: Mapped[str] = mapped_column(String(20), default="available")
+    silver_record_count: Mapped[int] = mapped_column(Integer, default=0)
+    silver_date_range_start: Mapped[dt.date | None] = mapped_column(nullable=True)
+    silver_date_range_end: Mapped[dt.date | None] = mapped_column(nullable=True)
+    bronze_ingestion_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("bronze_ingestion_run.id"), nullable=True
+    )
+    source_provider: Mapped[str] = mapped_column(String(50))
     created_at: Mapped[dt.datetime] = mapped_column(DateTime)
 
 
 class RiskSnapshotRecord(Base):
-    """Persisted snapshot of the Volatility & Risk data product (§7). See
-    MarketStructureSnapshotRecord's docstring re: not-yet-written and the
-    `Record` naming convention."""
+    """Persisted snapshot of the Volatility & Risk data product (§7)."""
 
-    __tablename__ = "risk_snapshots"
+    __tablename__ = "gold_risk_snapshot"
     __table_args__ = (
-        UniqueConstraint("ticker_id", "date", "calculation_version", name="uq_risk_snapshot"),
+        UniqueConstraint("ticker_id", "date", "calculation_version", name="uq_gold_risk_snapshot"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -110,18 +182,23 @@ class RiskSnapshotRecord(Base):
     benchmark_symbol: Mapped[str | None] = mapped_column(String(15), nullable=True)
     payload: Mapped[dict] = mapped_column(JSON)
     data_quality_status: Mapped[str] = mapped_column(String(20), default="available")
+    silver_record_count: Mapped[int] = mapped_column(Integer, default=0)
+    silver_date_range_start: Mapped[dt.date | None] = mapped_column(nullable=True)
+    silver_date_range_end: Mapped[dt.date | None] = mapped_column(nullable=True)
+    bronze_ingestion_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("bronze_ingestion_run.id"), nullable=True
+    )
+    source_provider: Mapped[str] = mapped_column(String(50))
     created_at: Mapped[dt.datetime] = mapped_column(DateTime)
 
 
 class VolumeLiquiditySnapshotRecord(Base):
-    """Persisted snapshot of the Volume & Liquidity data product (§8). See
-    MarketStructureSnapshotRecord's docstring re: not-yet-written and the
-    `Record` naming convention."""
+    """Persisted snapshot of the Volume & Liquidity data product (§8)."""
 
-    __tablename__ = "volume_liquidity_snapshots"
+    __tablename__ = "gold_volume_liquidity_snapshot"
     __table_args__ = (
         UniqueConstraint(
-            "ticker_id", "date", "calculation_version", name="uq_volume_liquidity_snapshot"
+            "ticker_id", "date", "calculation_version", name="uq_gold_volume_liquidity_snapshot"
         ),
     )
 
@@ -131,18 +208,23 @@ class VolumeLiquiditySnapshotRecord(Base):
     calculation_version: Mapped[str] = mapped_column(String(20))
     payload: Mapped[dict] = mapped_column(JSON)
     data_quality_status: Mapped[str] = mapped_column(String(20), default="available")
+    silver_record_count: Mapped[int] = mapped_column(Integer, default=0)
+    silver_date_range_start: Mapped[dt.date | None] = mapped_column(nullable=True)
+    silver_date_range_end: Mapped[dt.date | None] = mapped_column(nullable=True)
+    bronze_ingestion_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("bronze_ingestion_run.id"), nullable=True
+    )
+    source_provider: Mapped[str] = mapped_column(String(50))
     created_at: Mapped[dt.datetime] = mapped_column(DateTime)
 
 
 class MarketContextSnapshotRecord(Base):
-    """Persisted snapshot of the Market & Sector Context data product
-    (§14.1). See MarketStructureSnapshotRecord's docstring re: not-yet-
-    written and the `Record` naming convention."""
+    """Persisted snapshot of the Market & Sector Context data product (§14.1)."""
 
-    __tablename__ = "market_context_snapshots"
+    __tablename__ = "gold_market_context_snapshot"
     __table_args__ = (
         UniqueConstraint(
-            "ticker_id", "date", "calculation_version", name="uq_market_context_snapshot"
+            "ticker_id", "date", "calculation_version", name="uq_gold_market_context_snapshot"
         ),
     )
 
@@ -154,6 +236,13 @@ class MarketContextSnapshotRecord(Base):
     sector_symbol: Mapped[str | None] = mapped_column(String(15), nullable=True)
     payload: Mapped[dict] = mapped_column(JSON)
     data_quality_status: Mapped[str] = mapped_column(String(20), default="available")
+    silver_record_count: Mapped[int] = mapped_column(Integer, default=0)
+    silver_date_range_start: Mapped[dt.date | None] = mapped_column(nullable=True)
+    silver_date_range_end: Mapped[dt.date | None] = mapped_column(nullable=True)
+    bronze_ingestion_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("bronze_ingestion_run.id"), nullable=True
+    )
+    source_provider: Mapped[str] = mapped_column(String(50))
     created_at: Mapped[dt.datetime] = mapped_column(DateTime)
 
 

@@ -37,16 +37,55 @@ This codebase currently implements **Phase 1 — Data plumbing**:
   own unit tests keep running - it's never constructed by the running
   application.)
 - Postgres schema (`catalystiq/db/models.py`, migrated with Alembic) matching
-  the spec's schema sketch: `tickers`, `price_history`,
-  `indicator_snapshots`, `options_snapshots`, `news_events`,
-  `behavioral_events`, `reinforcement_stats`, `reports`.
+  the spec's schema sketch, plus the medallion tables below: `tickers`,
+  `options_snapshots`, `news_events`, `behavioral_events`,
+  `reinforcement_stats`, `reports`.
 - The Data Validation Layer (`catalystiq/validation/data_quality.py`):
   chronological-order check, dedupe, missing-trading-day detection, abnormal
   price-gap flagging (z-score), and a live-quote cross-check — run before
   any bar is persisted as "ready for rules."
-- An ingestion endpoint (`POST /market-data/ingest/{symbol}`) that pulls
-  OHLCV, runs the validation layer, and upserts cleaned bars into
-  `price_history`, returning the resulting data-quality report.
+- A **Bronze -> Silver -> Gold medallion pipeline** for the price-bar domain
+  (`catalystiq/pipelines/market_price_pipeline.py`) - the only domain with a
+  real, working ingestion path today. Implemented as plain PostgreSQL/SQLite
+  tables with prefixed names (no Postgres schema objects, since the whole
+  test suite runs on SQLite), not a distributed lakehouse:
+
+  ```
+  Providers -> Bronze -> Silver -> Gold -> API/UI
+  ```
+
+  - **Bronze** (`bronze_ingestion_run`, `bronze_market_price_bar`):
+    source-aligned, minimally-transformed OHLCV exactly as
+    `MarketDataProvider.get_ohlcv()` returned it, with an ingestion-run audit
+    trail. Append-only - a routine re-ingest never overwrites a prior run's
+    rows. Written by `ingest_bronze()`.
+  - **Silver** (`silver_price_bar`, `silver_price_bar_rejected`): reads only
+    from Bronze (plus an optional live quote from an approved real-time
+    adapter for the cross-check), runs the existing Data Validation Layer,
+    and upserts cleaned bars keyed on ticker+date - idempotent, so
+    reprocessing the same Bronze run reproduces the same Silver state. Bars
+    with an invalid OHLC relationship are quarantined into
+    `silver_price_bar_rejected` rather than dropped; bars with other issues
+    (abnormal gaps, thin history, ...) stay in Silver flagged
+    `data_quality_status="flagged"`. Written by `build_silver()`.
+  - **Gold** (`gold_technical_snapshot`, `gold_market_structure_snapshot`,
+    `gold_risk_snapshot`, `gold_volume_liquidity_snapshot`,
+    `gold_market_context_snapshot`): reads only from Silver via
+    `get_silver_bars()` - never touches a provider - calls the existing pure
+    compute functions in `catalystiq/analysis/*.py` unchanged, and persists
+    a versioned row (`calculation_version` + full lineage: Silver record
+    count/date range, Bronze ingestion run id, source provider, calculated-
+    at) keyed on ticker+date+calculation_version. Written by the five
+    `build_gold_*()` functions.
+  - `ensure_fresh()` is the only place a router-triggered flow is allowed to
+    touch the provider: it runs Bronze->Silver on demand if Silver has no
+    data for a symbol or it's older than 24h, otherwise no-ops. Every
+    `GET /analysis/...` endpoint calls it before reading Gold, so searching
+    an unseen ticker still "just works" without a separate explicit ingest
+    step - the on-demand ingest is the only provider touchpoint; the Gold
+    compute functions themselves never call a provider.
+- `POST /market-data/ingest/{symbol}` now runs `ingest_bronze()` then
+  `build_silver()` (same response shape - a `DataQualityReport`).
 
 There's also a working slice of **Phase 7 — Frontend** (`frontend/`): a
 React + Vite + Tailwind app with four tabs:
@@ -97,9 +136,13 @@ catalystiq/
   schemas/                # Pydantic request/response/domain shapes
   validation/
     data_quality.py        # Data Validation Layer (§2.9)
+  analysis/                  # pure compute functions for each Gold product
+  pipelines/
+    market_price_pipeline.py # Bronze -> Silver -> Gold for the price-bar domain
   routers/
     broker.py               # /paper/* (account, positions, orders)
     market_data.py            # /market-data/* (quote, ohlcv, ingest, ...)
+    analysis.py                # /analysis/* (Gold-layer reads, on-demand ingest)
 alembic/                      # schema migrations
 tests/                         # pytest suite (offline; provider calls are mocked)
 app.py                          # deployment entrypoint, re-exports catalystiq.main:app

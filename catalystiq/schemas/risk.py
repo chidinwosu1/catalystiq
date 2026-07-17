@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from catalystiq.schemas.analysis import FeatureReading
+from catalystiq.schemas.analysis import FeatureReading, Lineage
 
 
 class RiskFlag(BaseModel):
@@ -33,3 +33,4 @@ class RiskSnapshot(BaseModel):
     metrics: list[FeatureReading]
     flags: list[RiskFlag]
     warnings: list[str] = []
+    lineage: Lineage | None = None

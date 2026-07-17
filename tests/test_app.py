@@ -165,7 +165,7 @@ def test_ingest_price_history_is_idempotent_on_rerun(client, test_db_session):
 
         ticker = test_db_session.query(models.Ticker).filter_by(symbol="DUP").one()
         row_count = (
-            test_db_session.query(models.PriceHistory).filter_by(ticker_id=ticker.id).count()
+            test_db_session.query(models.SilverPriceBar).filter_by(ticker_id=ticker.id).count()
         )
         assert row_count == len(bars)
     finally:

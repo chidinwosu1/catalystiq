@@ -14,8 +14,10 @@ def _bar(date, close):
 class _FakeProvider:
     def __init__(self, bars):
         self._bars = bars
+        self.ohlcv_calls = 0
 
     def get_ohlcv(self, symbol, start, end=None, interval="1d"):
+        self.ohlcv_calls += 1
         return self._bars
 
     def get_quote(self, symbol):
@@ -62,6 +64,33 @@ def test_technical_snapshot_returns_computed_indicators(client):
         assert by_name["rsi_14"]["status"] == "computed"
         assert by_name["rsi_14"]["value"] == 100.0
         assert by_name["rsi_14"]["percentile_5y"] is None  # under 3y of history
+
+        assert body["lineage"]["silver_record_count"] == len(bars)
+        assert body["lineage"]["source_provider"] == "_FakeProvider"
+    finally:
+        del app.dependency_overrides[get_market_data_provider]
+
+
+def test_technical_snapshot_reuses_silver_on_second_request(client):
+    days = []
+    d = dt.date(2020, 1, 2)
+    while len(days) < 300:
+        if d.weekday() < 5:
+            days.append(d)
+        d += dt.timedelta(days=1)
+    bars = [_bar(day, 100 + i * 0.5) for i, day in enumerate(days)]
+    provider = _FakeProvider(bars)
+
+    app.dependency_overrides[get_market_data_provider] = lambda: provider
+    try:
+        r1 = client.get("/analysis/technical/CACHED")
+        assert r1.status_code == 200
+        assert provider.ohlcv_calls == 1
+
+        r2 = client.get("/analysis/technical/CACHED")
+        assert r2.status_code == 200
+        assert provider.ohlcv_calls == 1  # Silver is fresh - no re-ingest.
+        assert r2.json()["lineage"]["silver_record_count"] == len(bars)
     finally:
         del app.dependency_overrides[get_market_data_provider]
 
@@ -130,6 +159,7 @@ def test_market_structure_snapshot_returns_structure(client):
         assert body["symbol"] == "UP"
         assert body["trend_structure"]["value"] == "higher_highs_higher_lows"
         assert len(body["support_resistance_levels"]) > 0
+        assert body["lineage"]["silver_record_count"] == len(bars)
     finally:
         del app.dependency_overrides[get_market_data_provider]
 

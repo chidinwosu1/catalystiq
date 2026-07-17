@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from catalystiq.schemas.analysis import FeatureReading
+from catalystiq.schemas.analysis import FeatureReading, Lineage
 
 LiquidityClass = Literal["high", "moderate", "low", "very_low", "unknown"]
 
@@ -19,3 +19,4 @@ class VolumeLiquiditySnapshot(BaseModel):
     metrics: list[FeatureReading]
     liquidity_classification: FeatureReading
     warnings: list[str] = []
+    lineage: Lineage | None = None

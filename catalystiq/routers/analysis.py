@@ -2,19 +2,29 @@
 for what's actually computed here versus the parts of the quantitative-
 scoring spec (rating, calibrated probabilities, confidence score) that
 remain out of scope until a real trained/validated model exists.
+
+Every endpoint here is a Gold-layer read: it calls `ensure_fresh()` to
+bring Silver up to date on demand (Bronze -> Silver, only touching the
+provider if Silver is missing or stale), then calls the relevant
+`build_gold_*()`, which computes from Silver only and persists lineage.
+See catalystiq/pipelines/market_price_pipeline.py.
 """
 from __future__ import annotations
 
-import datetime as dt
-
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
 
-from catalystiq.analysis.indicators import compute_technical_snapshot
-from catalystiq.analysis.market_structure import compute_market_structure_snapshot
-from catalystiq.analysis.risk import compute_risk_snapshot
-from catalystiq.analysis.market_context import SECTOR_ETF_MAP, compute_market_context_snapshot
-from catalystiq.analysis.volume_liquidity import compute_volume_liquidity_snapshot
+from catalystiq.analysis.market_context import SECTOR_ETF_MAP
 from catalystiq.auth import verify_action_key
+from catalystiq.db.base import get_db
+from catalystiq.pipelines.market_price_pipeline import (
+    build_gold_market_context,
+    build_gold_market_structure,
+    build_gold_risk,
+    build_gold_technical,
+    build_gold_volume_liquidity,
+    ensure_fresh,
+)
 from catalystiq.providers.market_data import (
     MarketDataError,
     MarketDataProvider,
@@ -33,13 +43,27 @@ router = APIRouter(
 )
 
 
-def _fetch_bars(
-    provider: MarketDataProvider, symbol: str, days: int
-) -> list:
+def _ensure_fresh(provider: MarketDataProvider, symbol: str, db: Session, days: int) -> None:
     try:
-        return provider.get_ohlcv(symbol, start=dt.date.today() - dt.timedelta(days=days))
+        ensure_fresh(symbol, provider, db, days=days)
     except MarketDataError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+def _ensure_fresh_optional(
+    provider: MarketDataProvider, symbol: str | None, db: Session, days: int
+) -> str | None:
+    """Best-effort freshness for an optional benchmark/market/sector symbol -
+    unavailability shouldn't block the primary snapshot (§24 partial-
+    degradation principle), so failures just drop the symbol instead of
+    raising."""
+    if not symbol:
+        return None
+    try:
+        ensure_fresh(symbol, provider, db, days=days)
+        return symbol
+    except MarketDataError:
+        return None
 
 
 @router.get("/technical/{symbol}", response_model=TechnicalSnapshot)
@@ -47,9 +71,10 @@ def get_technical_snapshot(
     symbol: str,
     days: int = Query(default=365 * 5, gt=0, le=3650),
     provider: MarketDataProvider = Depends(get_market_data_provider),
+    db: Session = Depends(get_db),
 ):
-    bars = _fetch_bars(provider, symbol, days)
-    return compute_technical_snapshot(symbol, bars)
+    _ensure_fresh(provider, symbol, db, days)
+    return build_gold_technical(symbol, db, provider_name=type(provider).__name__)
 
 
 @router.get("/{symbol}/market-structure", response_model=MarketStructureSnapshot)
@@ -57,9 +82,10 @@ def get_market_structure_snapshot(
     symbol: str,
     days: int = Query(default=365 * 5, gt=0, le=3650),
     provider: MarketDataProvider = Depends(get_market_data_provider),
+    db: Session = Depends(get_db),
 ):
-    bars = _fetch_bars(provider, symbol, days)
-    return compute_market_structure_snapshot(symbol, bars)
+    _ensure_fresh(provider, symbol, db, days)
+    return build_gold_market_structure(symbol, db, provider_name=type(provider).__name__)
 
 
 @router.get("/{symbol}/risk", response_model=RiskSnapshot)
@@ -68,26 +94,18 @@ def get_risk_snapshot(
     days: int = Query(default=365 * 5, gt=0, le=3650),
     benchmark: str | None = Query(default="SPY"),
     provider: MarketDataProvider = Depends(get_market_data_provider),
+    db: Session = Depends(get_db),
 ):
-    bars = _fetch_bars(provider, symbol, days)
+    _ensure_fresh(provider, symbol, db, days)
+    resolved_benchmark = _ensure_fresh_optional(provider, benchmark, db, days)
 
-    benchmark_bars = None
-    warning: str | None = None
-    if benchmark:
-        try:
-            benchmark_bars = provider.get_ohlcv(
-                benchmark, start=dt.date.today() - dt.timedelta(days=days)
-            )
-        except MarketDataError as exc:
-            # Benchmark unavailability shouldn't block the rest of the risk
-            # snapshot (§24 partial-degradation principle) - beta/correlation
-            # just come back "not_supported" instead.
-            warning = f"Benchmark {benchmark!r} unavailable: {exc}"
-            benchmark = None
-
-    snapshot = compute_risk_snapshot(symbol, bars, benchmark_bars=benchmark_bars, benchmark_symbol=benchmark)
-    if warning:
-        snapshot.warnings.append(warning)
+    snapshot = build_gold_risk(
+        symbol, db, benchmark_symbol=resolved_benchmark, provider_name=type(provider).__name__
+    )
+    if benchmark and not resolved_benchmark:
+        # Beta/correlation just come back "not_supported" instead of
+        # blocking the rest of the risk snapshot.
+        snapshot.warnings.append(f"Benchmark {benchmark!r} unavailable.")
     return snapshot
 
 
@@ -96,9 +114,10 @@ def get_volume_liquidity_snapshot(
     symbol: str,
     days: int = Query(default=365 * 5, gt=0, le=3650),
     provider: MarketDataProvider = Depends(get_market_data_provider),
+    db: Session = Depends(get_db),
 ):
-    bars = _fetch_bars(provider, symbol, days)
-    return compute_volume_liquidity_snapshot(symbol, bars)
+    _ensure_fresh(provider, symbol, db, days)
+    return build_gold_volume_liquidity(symbol, db, provider_name=type(provider).__name__)
 
 
 @router.get("/{symbol}/market-context", response_model=MarketContextSnapshot)
@@ -108,36 +127,28 @@ def get_market_context_snapshot(
     market: str | None = Query(default="SPY"),
     sector: str | None = Query(default=None, description="Sector name, e.g. 'Technology' - resolved to a sector ETF via SECTOR_ETF_MAP."),
     provider: MarketDataProvider = Depends(get_market_data_provider),
+    db: Session = Depends(get_db),
 ):
-    bars = _fetch_bars(provider, symbol, days)
+    _ensure_fresh(provider, symbol, db, days)
     warnings: list[str] = []
 
-    market_bars = None
-    if market:
-        try:
-            market_bars = provider.get_ohlcv(market, start=dt.date.today() - dt.timedelta(days=days))
-        except MarketDataError as exc:
-            warnings.append(f"Market benchmark {market!r} unavailable: {exc}")
-            market = None
+    resolved_market = _ensure_fresh_optional(provider, market, db, days)
+    if market and not resolved_market:
+        warnings.append(f"Market benchmark {market!r} unavailable.")
 
     sector_symbol = SECTOR_ETF_MAP.get(sector) if sector else None
-    sector_bars = None
     if sector and not sector_symbol:
         warnings.append(f"Sector {sector!r} isn't mapped to a sector ETF; sector-relative metrics omitted.")
-    elif sector_symbol:
-        try:
-            sector_bars = provider.get_ohlcv(sector_symbol, start=dt.date.today() - dt.timedelta(days=days))
-        except MarketDataError as exc:
-            warnings.append(f"Sector benchmark {sector_symbol!r} unavailable: {exc}")
-            sector_symbol = None
+    resolved_sector = _ensure_fresh_optional(provider, sector_symbol, db, days)
+    if sector_symbol and not resolved_sector:
+        warnings.append(f"Sector benchmark {sector_symbol!r} unavailable.")
 
-    snapshot = compute_market_context_snapshot(
+    snapshot = build_gold_market_context(
         symbol,
-        bars,
-        market_bars=market_bars,
-        market_symbol=market,
-        sector_bars=sector_bars,
-        sector_symbol=sector_symbol,
+        db,
+        market_symbol=resolved_market,
+        sector_symbol=resolved_sector,
+        provider_name=type(provider).__name__,
     )
     snapshot.warnings.extend(warnings)
     return snapshot

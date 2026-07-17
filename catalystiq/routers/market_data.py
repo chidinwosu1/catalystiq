@@ -10,8 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from catalystiq.auth import verify_action_key
-from catalystiq.db import models
 from catalystiq.db.base import get_db
+from catalystiq.pipelines.market_price_pipeline import build_silver, ingest_bronze
 from catalystiq.providers.market_data import (
     MarketDataError,
     MarketDataProvider,
@@ -19,7 +19,6 @@ from catalystiq.providers.market_data import (
 )
 from catalystiq.schemas.market_data import FundamentalsSnapshot, NewsItem, OHLCVBar, Quote
 from catalystiq.schemas.validation import DataQualityReport
-from catalystiq.validation.data_quality import validate_price_history
 
 router = APIRouter(
     prefix="/market-data",
@@ -77,41 +76,17 @@ def ingest_price_history(
     provider: MarketDataProvider = Depends(get_market_data_provider),
     db: Session = Depends(get_db),
 ):
-    """Pulls OHLCV, runs the Data Validation Layer, and upserts cleaned bars
-    into `price_history`. Existing dates are left untouched (append-only);
-    re-running ingestion is safe to repeat.
+    """Runs the Bronze -> Silver pipeline (catalystiq/pipelines/
+    market_price_pipeline.py): fetches raw OHLCV into an append-only Bronze
+    ingestion run, then validates/cleans/upserts into Silver. Re-running
+    ingestion is safe to repeat - Bronze never overwrites a prior run, and
+    Silver upserts are idempotent per ticker+date.
     """
     try:
-        raw_bars = provider.get_ohlcv(symbol, start=dt.date.today() - dt.timedelta(days=days))
+        run = ingest_bronze(symbol, days, provider, db)
         live_quote = provider.get_quote(symbol)
     except MarketDataError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    cleaned_bars, report = validate_price_history(symbol, raw_bars, live_quote=live_quote)
-
-    ticker = db.query(models.Ticker).filter_by(symbol=symbol.upper()).one_or_none()
-    if ticker is None:
-        ticker = models.Ticker(symbol=symbol.upper())
-        db.add(ticker)
-        db.flush()
-
-    existing_dates = {
-        row.date for row in db.query(models.PriceHistory.date).filter_by(ticker_id=ticker.id)
-    }
-    for bar in cleaned_bars:
-        if bar.date in existing_dates:
-            continue
-        db.add(
-            models.PriceHistory(
-                ticker_id=ticker.id,
-                date=bar.date,
-                open=bar.open,
-                high=bar.high,
-                low=bar.low,
-                close=bar.close,
-                volume=bar.volume,
-            )
-        )
-    db.commit()
-
-    return report
+    result = build_silver(symbol, db, ingestion_run=run, live_quote=live_quote)
+    return result.report

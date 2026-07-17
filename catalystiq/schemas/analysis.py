@@ -37,6 +37,7 @@ class TechnicalSnapshot(BaseModel):
     history_days_available: int
     indicators: list[IndicatorReading]
     warnings: list[str] = []
+    lineage: Lineage | None = None
 
 
 # --- Shared contract for every analytical data product added after the
@@ -76,3 +77,22 @@ class FeatureReading(BaseModel):
     calculation_version: str = "1.0.0"
     percentile_5y: float | None = None
     zscore_5y: float | None = None
+
+
+class Lineage(BaseModel):
+    """Traces a Gold record back through Silver to its Bronze ingestion run,
+    per the medallion-architecture requirement: every Gold record must be
+    traceable to a calculation version, the Silver data it was built from,
+    the Bronze ingestion run behind that, the source provider, and when it
+    was calculated. Attached to every Gold snapshot response
+    (TechnicalSnapshot, MarketStructureSnapshot, RiskSnapshot,
+    VolumeLiquiditySnapshot, MarketContextSnapshot) - see
+    catalystiq/pipelines/market_price_pipeline.py's build_gold()."""
+
+    calculation_version: str
+    silver_record_count: int
+    silver_date_range_start: dt.date | None = None
+    silver_date_range_end: dt.date | None = None
+    bronze_ingestion_run_id: int | None = None
+    source_provider: str
+    calculated_at: dt.datetime

@@ -9,7 +9,7 @@ import datetime as dt
 
 from pydantic import BaseModel
 
-from catalystiq.schemas.analysis import FeatureReading
+from catalystiq.schemas.analysis import FeatureReading, Lineage
 
 
 class MarketContextSnapshot(BaseModel):
@@ -21,3 +21,4 @@ class MarketContextSnapshot(BaseModel):
     history_days_available: int
     metrics: list[FeatureReading]
     warnings: list[str] = []
+    lineage: Lineage | None = None

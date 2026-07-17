@@ -24,8 +24,7 @@ from catalystiq.schemas.analysis import IndicatorReading, TechnicalSnapshot
 from catalystiq.schemas.market_data import OHLCVBar
 
 # §6.1/§8: historical percentile/z-score require at least three years of
-# valid history. The field is still named `percentile_5y` (matching the
-# existing `IndicatorSnapshot.percentile_5y` column) since five years is
+# valid history. The field is named `percentile_5y` since five years is
 # the spec's preferred depth - three years is only the enforced minimum.
 _PERCENTILE_MIN_HISTORY_DAYS = 365 * 3
 

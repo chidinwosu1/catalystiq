@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from catalystiq.schemas.analysis import FeatureReading
+from catalystiq.schemas.analysis import FeatureReading, Lineage
 
 
 class SwingPoint(BaseModel):
@@ -54,3 +54,4 @@ class MarketStructureSnapshot(BaseModel):
     gap_readings: list[FeatureReading]
     regime: FeatureReading
     warnings: list[str] = []
+    lineage: Lineage | None = None
