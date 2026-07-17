@@ -29,6 +29,7 @@ import {
 } from "../lib/api";
 import SectionCard from "../components/SectionCard";
 import NextAction from "../components/NextAction";
+import RecentActivity from "../components/dashboard/RecentActivity";
 import type { PageId } from "../types/nav";
 
 interface TradeTicketPageProps {
@@ -204,6 +205,16 @@ export default function TradeTicketPage({
     setSubmitResult(null);
     setSubmitError(null);
     setSymbol(symbolInput.trim().toUpperCase());
+  }
+
+  function loadSymbol(sym: string) {
+    const upper = sym.trim().toUpperCase();
+    setReviewing(false);
+    setSubmitResult(null);
+    setSubmitError(null);
+    setSymbolInput(upper);
+    setSymbol(upper);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function handleTradingStyleChange(style: TradingStyle) {
@@ -818,6 +829,8 @@ export default function TradeTicketPage({
           </div>
         </SectionCard>
       )}
+
+      <RecentActivity onResume={loadSymbol} />
 
       <NextAction
         step="Next step · Monitor your position"

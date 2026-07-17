@@ -6,12 +6,26 @@ export interface PageDescriptor {
   description: string;
 }
 
+// Ordered to follow the investment workflow: get the market read, form a
+// strategy, place the trade, then manage the book.
 export const PAGES: PageDescriptor[] = [
   {
     id: "home",
     label: "Command Center",
     description:
-      "Your investment command center - today's market read, highest-conviction opportunities, catalysts, alerts, and what to do next.",
+      "Your investment command center - today's market read, catalysts, alerts, and what to do next.",
+  },
+  {
+    id: "markets",
+    label: "Market Analysis",
+    description:
+      "The daily macro dashboard - index levels, sector ranking, catalysts, and investor behavior analysis.",
+  },
+  {
+    id: "analysis",
+    label: "Investment Strategy",
+    description:
+      "Today's highest-conviction opportunities, per-ticker research, and your own trade journal and performance.",
   },
   {
     id: "trade",
@@ -24,17 +38,5 @@ export const PAGES: PageDescriptor[] = [
     label: "Portfolio",
     description:
       "Your real account balance and positions from the connected paper-trading broker.",
-  },
-  {
-    id: "markets",
-    label: "Market Analysis",
-    description:
-      "The daily macro dashboard - index levels, sector ranking, catalysts, and investor behavior analysis.",
-  },
-  {
-    id: "analysis",
-    label: "Analysis",
-    description:
-      "Research a ticker, log your trades, and review your own performance over time.",
   },
 ];

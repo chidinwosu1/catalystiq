@@ -17,6 +17,7 @@ import ConfidenceMeter from "../components/ConfidenceMeter";
 import NextAction from "../components/NextAction";
 import { getDemoAnalysis, getDemoSetup } from "../mockAnalysisDetail";
 import BehavioralAnalysisTable from "../components/BehavioralAnalysisTable";
+import ConvictionOpportunities from "../components/dashboard/ConvictionOpportunities";
 import { getStockBehavioralAnalysis } from "../mockBehavioralData";
 import type { PageId } from "../types/nav";
 
@@ -184,6 +185,13 @@ export default function AnalysisJournalPage({
     setSymbol(symbolInput.trim().toUpperCase());
   }
 
+  function selectSymbol(sym: string) {
+    const upper = sym.trim().toUpperCase();
+    setSymbolInput(upper);
+    setSymbol(upper);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   function addEntry() {
     setEntries((prev) => [{ ...draft, id: crypto.randomUUID() }, ...prev]);
     setDraft(emptyDraft(symbol));
@@ -237,11 +245,14 @@ export default function AnalysisJournalPage({
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold text-ink-primary">Analysis & Trade Journal</h1>
+        <h1 className="text-xl font-semibold text-ink-primary">Investment Strategy</h1>
         <p className="mt-1 text-sm text-ink-secondary">
-          Research a ticker, then log and review your own trades.
+          Start from today's highest-conviction opportunities, research a ticker, then log and
+          review your own trades.
         </p>
       </div>
+
+      <ConvictionOpportunities onReview={selectSymbol} />
 
       <SectionCard
         title="Stock Analysis"
