@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { AlertTriangle, BookOpen, Loader2 } from "lucide-react";
 import { ApiError, getAccount, getPositions, type AccountInfo, type Position } from "../lib/api";
 import SectionCard from "../components/SectionCard";
 import StatTile from "../components/StatTile";
 import DemoBadge from "../components/DemoBadge";
+import NextAction from "../components/NextAction";
+import type { PageId } from "../types/nav";
 
 interface PortfolioPageProps {
   onTrade: (symbol: string) => void;
   onViewAnalysis: (symbol: string) => void;
+  onNavigate: (page: PageId) => void;
 }
 
 function money(n: number): string {
@@ -18,7 +21,11 @@ function pct(n: number): string {
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
 }
 
-export default function PortfolioPage({ onTrade, onViewAnalysis }: PortfolioPageProps) {
+export default function PortfolioPage({
+  onTrade,
+  onViewAnalysis,
+  onNavigate,
+}: PortfolioPageProps) {
   const [account, setAccount] = useState<AccountInfo | null>(null);
   const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(true);
@@ -199,6 +206,15 @@ export default function PortfolioPage({ onTrade, onViewAnalysis }: PortfolioPage
           Your portfolio is heavily concentrated in large-cap technology.
         </p>
       </SectionCard>
+
+      <NextAction
+        step="Next step · Review your process"
+        prompt="Close the loop — review your trade journal and performance analytics to see if you're following a profitable process."
+        label="Review Journal"
+        icon={<BookOpen size={15} />}
+        onClick={() => onNavigate("analysis")}
+        secondary={{ label: "Scan the market", onClick: () => onNavigate("markets") }}
+      />
     </div>
   );
 }

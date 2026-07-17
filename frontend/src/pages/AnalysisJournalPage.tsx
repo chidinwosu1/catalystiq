@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Loader2, Plus } from "lucide-react";
+import { AlertTriangle, Loader2, Plus, Send } from "lucide-react";
 import {
   ApiError,
   getQuote,
@@ -14,13 +14,16 @@ import DemoBadge from "../components/DemoBadge";
 import RatingBadge from "../components/RatingBadge";
 import ProbabilityBar from "../components/ProbabilityBar";
 import ConfidenceMeter from "../components/ConfidenceMeter";
+import NextAction from "../components/NextAction";
 import { getDemoAnalysis, getDemoSetup } from "../mockAnalysisDetail";
 import BehavioralAnalysisTable from "../components/BehavioralAnalysisTable";
 import { getStockBehavioralAnalysis } from "../mockBehavioralData";
+import type { PageId } from "../types/nav";
 
 interface AnalysisJournalPageProps {
   initialSymbol: string;
   onTrade: (symbol: string) => void;
+  onNavigate: (page: PageId) => void;
 }
 
 interface JournalEntry {
@@ -113,6 +116,7 @@ function formatIndicatorValue(reading: IndicatorReading): string {
 export default function AnalysisJournalPage({
   initialSymbol,
   onTrade,
+  onNavigate,
 }: AnalysisJournalPageProps) {
   const [symbolInput, setSymbolInput] = useState(initialSymbol || "AAPL");
   const [symbol, setSymbol] = useState((initialSymbol || "AAPL").toUpperCase());
@@ -622,6 +626,15 @@ export default function AnalysisJournalPage({
           </>
         )}
       </SectionCard>
+
+      <NextAction
+        step="Next step · Place the trade"
+        prompt={`Thesis confirmed for ${symbol}? Take the setup to the trade ticket and set your risk controls.`}
+        label={`Trade ${symbol}`}
+        icon={<Send size={15} />}
+        onClick={() => onTrade(symbol)}
+        secondary={{ label: "Back to market scan", onClick: () => onNavigate("markets") }}
+      />
     </div>
   );
 }

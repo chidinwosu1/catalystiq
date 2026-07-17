@@ -28,18 +28,32 @@ function App() {
       <Header activePage={activePage} onNavigate={setActivePage} onSearch={goToTrade} />
 
       <main className="mx-auto w-full max-w-7xl flex-1 px-6 py-8">
-        {activePage === "home" && <HomePage onNavigate={setActivePage} />}
+        {activePage === "home" && (
+          <HomePage onNavigate={setActivePage} onViewAnalysis={goToAnalysis} />
+        )}
         {activePage === "trade" && (
-          <TradeTicketPage initialSymbol={tradeSymbol} onViewAnalysis={goToAnalysis} />
+          <TradeTicketPage
+            initialSymbol={tradeSymbol}
+            onViewAnalysis={goToAnalysis}
+            onNavigate={setActivePage}
+          />
         )}
         {activePage === "portfolio" && (
-          <PortfolioPage onTrade={goToTrade} onViewAnalysis={goToAnalysis} />
+          <PortfolioPage
+            onTrade={goToTrade}
+            onViewAnalysis={goToAnalysis}
+            onNavigate={setActivePage}
+          />
         )}
         {activePage === "markets" && (
           <MarketIntelligencePage onTrade={goToTrade} onViewAnalysis={goToAnalysis} />
         )}
         {activePage === "analysis" && (
-          <AnalysisJournalPage initialSymbol={analysisSymbol} onTrade={goToTrade} />
+          <AnalysisJournalPage
+            initialSymbol={analysisSymbol}
+            onTrade={goToTrade}
+            onNavigate={setActivePage}
+          />
         )}
       </main>
 

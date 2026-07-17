@@ -1,7 +1,8 @@
-import { TrendingDown, TrendingUp } from "lucide-react";
+import { LineChart, TrendingDown, TrendingUp } from "lucide-react";
 import SectionCard from "../components/SectionCard";
 import DemoBadge from "../components/DemoBadge";
 import RatingBadge from "../components/RatingBadge";
+import NextAction from "../components/NextAction";
 import BehavioralAnalysisTable from "../components/BehavioralAnalysisTable";
 import { catalysts, dailyWatchlist, marketOverview, sectorRotation } from "../mockMarketData";
 import { marketWideBehavioralAnalysis } from "../mockBehavioralData";
@@ -22,6 +23,8 @@ export default function MarketIntelligencePage({
   onTrade,
   onViewAnalysis,
 }: MarketIntelligencePageProps) {
+  const topName = dailyWatchlist[0]?.symbol ?? "NVDA";
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-3">
@@ -184,6 +187,15 @@ export default function MarketIntelligencePage({
           </table>
         </div>
       </SectionCard>
+
+      <NextAction
+        step="Next step · Research a candidate"
+        prompt={`${topName} tops today's watchlist. Dig into the full research before you commit capital.`}
+        label={`Research ${topName}`}
+        icon={<LineChart size={15} />}
+        onClick={() => onViewAnalysis(topName)}
+        secondary={{ label: `Trade ${topName}`, onClick: () => onTrade(topName) }}
+      />
     </div>
   );
 }
