@@ -85,7 +85,7 @@ SOURCE_REGISTRY: list[SourceDescriptor] = [
         requires_api_key=False,  # no key, but a descriptive User-Agent is required
         license=LicenseClassification.PUBLIC_DOMAIN,
         base_urls=("https://www.sec.gov", "https://data.sec.gov"),
-        implemented=False,
+        implemented=True,
         notes="Requires a descriptive SEC_USER_AGENT per SEC fair-access policy.",
     ),
     # --- macro ---
@@ -255,6 +255,10 @@ def build_adapter(name: str, settings=None):
         from catalystiq.providers.macro import get_macro_provider
 
         return get_macro_provider()
+    if name == "sec_edgar":
+        from catalystiq.providers.fundamentals import get_fundamentals_provider
+
+        return get_fundamentals_provider()
 
     # Unreachable: every implemented source is handled above. Guard anyway so
     # marking a source implemented without wiring it here fails loudly.

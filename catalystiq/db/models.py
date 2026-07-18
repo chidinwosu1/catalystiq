@@ -298,6 +298,105 @@ class SilverEconomicRelease(Base, SilverRecordMixin):
     link: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
 
+class SilverSecurityIdentifier(Base, SilverRecordMixin):
+    """Ticker <-> CIK mapping (§6). Idempotent on (provider, cik). `symbol`
+    is indexed but not the identity - tickers can change or be reused, so the
+    CIK is the stable key (spec §12 principle)."""
+
+    __tablename__ = "silver_security_identifier"
+    __table_args__ = (
+        UniqueConstraint("provider", "cik", name="uq_silver_security_identifier"),
+    )
+
+    cik: Mapped[str] = mapped_column(String(10), index=True)
+    symbol: Mapped[str] = mapped_column(String(15), index=True)
+    name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+
+class SilverCompanyFiling(Base, SilverRecordMixin):
+    """A company filing's metadata (§6). Idempotent on
+    (provider, accession_number) - the accession number is SEC's stable id
+    for a filing."""
+
+    __tablename__ = "silver_company_filing"
+    __table_args__ = (
+        UniqueConstraint("provider", "accession_number", name="uq_silver_company_filing"),
+    )
+
+    cik: Mapped[str] = mapped_column(String(10), index=True)
+    symbol: Mapped[str | None] = mapped_column(String(15), nullable=True)
+    form: Mapped[str] = mapped_column(String(20), index=True)
+    accession_number: Mapped[str] = mapped_column(String(30), index=True)
+    filing_date: Mapped[dt.date | None] = mapped_column(nullable=True, index=True)
+    acceptance_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    report_date: Mapped[dt.date | None] = mapped_column(nullable=True)
+    primary_document: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    primary_doc_description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_amendment: Mapped[bool] = mapped_column(default=False)
+    source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
+class SilverCompanyFact(Base, SilverRecordMixin):
+    """One normalized XBRL company fact (§6) - also serves as the financial-
+    statement fact (an XBRL fact IS a statement-line fact), so it isn't
+    duplicated into a second table.
+
+    Identity includes the accession number, so an amended filing's value
+    lands as a NEW row rather than overwriting the originally-filed value
+    (§6); `is_amendment` flags it and `filing_date` orders vintages. The
+    active value for a (concept, unit, period) is the row with the latest
+    filing_date - see fundamentals_pipeline.get_active_facts()."""
+
+    __tablename__ = "silver_company_fact"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "cik",
+            "accession_number",
+            "taxonomy",
+            "concept",
+            "unit",
+            "period_start",
+            "period_end",
+            name="uq_silver_company_fact",
+        ),
+    )
+
+    cik: Mapped[str] = mapped_column(String(10), index=True)
+    taxonomy: Mapped[str] = mapped_column(String(30))
+    concept: Mapped[str] = mapped_column(String(120), index=True)
+    unit: Mapped[str] = mapped_column(String(30))
+    value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fiscal_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fiscal_period: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    period_start: Mapped[dt.date | None] = mapped_column(nullable=True)
+    period_end: Mapped[dt.date | None] = mapped_column(nullable=True)
+    form: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    filing_date: Mapped[dt.date | None] = mapped_column(nullable=True)
+    accession_number: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    is_amendment: Mapped[bool] = mapped_column(default=False)
+    frame: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+
+class SilverMaterialEvent(Base, SilverRecordMixin):
+    """An 8-K material event (§6). Idempotent on (provider, accession_number)."""
+
+    __tablename__ = "silver_material_event"
+    __table_args__ = (
+        UniqueConstraint("provider", "accession_number", name="uq_silver_material_event"),
+    )
+
+    cik: Mapped[str] = mapped_column(String(10), index=True)
+    symbol: Mapped[str | None] = mapped_column(String(15), nullable=True)
+    accession_number: Mapped[str] = mapped_column(String(30), index=True)
+    form: Mapped[str] = mapped_column(String(20))
+    filing_date: Mapped[dt.date | None] = mapped_column(nullable=True, index=True)
+    acceptance_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    items: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    is_amendment: Mapped[bool] = mapped_column(default=False)
+    source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
 class SilverPriceBar(Base):
     __tablename__ = "silver_price_bar"
     __table_args__ = (UniqueConstraint("ticker_id", "date", name="uq_silver_price_bar_ticker_date"),)

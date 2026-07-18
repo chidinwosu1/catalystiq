@@ -258,10 +258,29 @@ is implemented. `validate_settings()` runs at startup and raises a
 values**. See `.env.example` for the full list (placeholders only; real
 secrets belong in your local `.env` / host environment, never in git).
 
-Implemented today: **Yahoo Finance** (market data, initial primary) and
-**Webull** (brokerage; read-only, order submission stays disabled). The
-other sources are registered and reported by config/health surfaces but
-their adapters arrive in later phases.
+Implemented today: **Yahoo Finance** (market data, initial primary),
+**Webull** (brokerage; read-only, order submission stays disabled),
+**NYSE** market calendar, **FRED/ALFRED** (macro, point-in-time vintages),
+and **SEC EDGAR** (fundamentals: filings, XBRL company facts, 8-K material
+events). The remaining sources (Twelve Data, BLS, BEA, FINRA, Nasdaq Trader)
+are registered and reported by config/health surfaces but their adapters
+arrive in later phases.
+
+New network/document domains flow through a generic Bronze store
+(`BronzeRawDocument`) and the `pipelines/ingestion.py` helpers, then into
+normalized Silver products that all share the `SilverRecordMixin` common
+columns: `silver_market_session`, `silver_macro_series` /
+`silver_macro_observation` / `silver_economic_release`,
+`silver_security_identifier` / `silver_company_filing` /
+`silver_company_fact` / `silver_material_event`. Point-in-time is preserved:
+a macro observation's vintage window is part of its identity, so a revision
+is a new row and the originally-known value is never overwritten; likewise an
+amended SEC filing's facts are preserved alongside the originals, with the
+latest-filed value surfaced as active.
+
+Read-only endpoints: `GET /market-calendar/sessions`, `GET /macro/series/{id}`,
+`GET /macro/series/{id}/observations?as_of=`, `GET /macro/releases`,
+`GET /fundamentals/{symbol}`, `GET /filings/{symbol}`.
 
 ## Reference-calculation adapter
 
