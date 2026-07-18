@@ -83,9 +83,11 @@ def test_build_adapter_unconfigured_source_raises_config_error():
 
 
 def test_build_adapter_unimplemented_source_raises_config_error():
-    # BLS is registered but has no adapter yet (arrives in Phase 3).
+    # Twelve Data is registered but has no adapter yet (arrives in Phase 4).
     with pytest.raises(ProviderError) as exc:
-        registry.build_adapter("bls", Settings(enable_bls=True, bls_api_key="dummy"))
+        registry.build_adapter(
+            "twelve_data", Settings(enable_twelve_data=True, twelve_data_api_key="dummy")
+        )
     assert exc.value.category is ProviderErrorCategory.CONFIG
     assert "not implemented" in str(exc.value).lower()
 

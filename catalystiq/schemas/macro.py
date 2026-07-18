@@ -37,6 +37,10 @@ class MacroObservation(BaseModel):
     units: str | None = None
     frequency: str | None = None
     seasonal_adjustment: str | None = None
+    # Provider-specific source fields preserved verbatim (e.g. BLS footnotes,
+    # period code, preliminary/revised flag) so normalizing into the shared
+    # shape never loses a source's own metadata (§8).
+    source_fields: dict | None = None
     source: str
     retrieved_at: dt.datetime
 

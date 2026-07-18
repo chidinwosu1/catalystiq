@@ -110,6 +110,52 @@ def ingest_series(
     return run
 
 
+def ingest_bls_series(
+    provider,
+    db: Session,
+    series_id: str,
+    start_year: int | None = None,
+    end_year: int | None = None,
+) -> models.BronzeIngestionRun:
+    """Fetch a BLS series' observations and store them under the macro domain,
+    normalized into the same MacroObservation shape as FRED (with BLS-specific
+    fields preserved in source_fields)."""
+    run = start_ingestion_run(
+        db,
+        domain=DOMAIN,
+        provider=provider.PROVIDER_NAME,
+        adapter_version=provider.ADAPTER_VERSION,
+        dataset="timeseries",
+        requested_identifier=series_id,
+        request_params={"series_id": series_id, "start_year": start_year, "end_year": end_year},
+        license_classification=LicenseClassification.PUBLIC_DOMAIN.value,
+        data_classification="end_of_day",
+    )
+    try:
+        obs_start = dt.date(start_year, 1, 1) if start_year else None
+        obs_end = dt.date(end_year, 12, 31) if end_year else None
+        series = provider.get_series(series_id)
+        observations = provider.get_observations(
+            series_id, observation_start=obs_start, observation_end=obs_end
+        )
+    except ProviderError as exc:
+        _fail_run(db, run, exc)
+        raise
+
+    store_raw_document(
+        db, run, source_identifier=series_id, document_type="series",
+        payload=series.model_dump(mode="json"),
+    )
+    store_raw_document(
+        db, run, source_identifier=series_id, document_type="observations",
+        payload={"observations": [o.model_dump(mode="json") for o in observations]},
+    )
+    finish_ingestion_run(db, run, status="succeeded", record_count=len(observations))
+    db.commit()
+    db.refresh(run)
+    return run
+
+
 def ingest_releases(provider: FredProvider, db: Session) -> models.BronzeIngestionRun:
     run = start_ingestion_run(
         db,
@@ -225,6 +271,7 @@ def build_silver_observations(db: Session, series_id: str, provider: str = "fred
             units=obs.units,
             frequency=obs.frequency,
             seasonal_adjustment=obs.seasonal_adjustment,
+            source_fields=obs.source_fields,
         )
         existing = (
             db.query(models.SilverMacroObservation)

@@ -108,7 +108,7 @@ SOURCE_REGISTRY: list[SourceDescriptor] = [
         requires_api_key=True,
         license=LicenseClassification.PUBLIC_DOMAIN,
         base_urls=("https://api.bls.gov/publicAPI/v2",),
-        implemented=False,
+        implemented=True,
         notes="Registered key raises daily-request and per-request series limits.",
     ),
     SourceDescriptor(
@@ -119,7 +119,7 @@ SOURCE_REGISTRY: list[SourceDescriptor] = [
         requires_api_key=True,
         license=LicenseClassification.PUBLIC_DOMAIN,
         base_urls=("https://apps.bea.gov/api/data",),
-        implemented=False,
+        implemented=True,
     ),
     # --- calendars ---
     SourceDescriptor(
@@ -259,6 +259,14 @@ def build_adapter(name: str, settings=None):
         from catalystiq.providers.fundamentals import get_fundamentals_provider
 
         return get_fundamentals_provider()
+    if name == "bls":
+        from catalystiq.providers.bls import get_bls_provider
+
+        return get_bls_provider()
+    if name == "bea":
+        from catalystiq.providers.bea import get_bea_provider
+
+        return get_bea_provider()
 
     # Unreachable: every implemented source is handled above. Guard anyway so
     # marking a source implemented without wiring it here fails loudly.

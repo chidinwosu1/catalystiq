@@ -276,6 +276,9 @@ class SilverMacroObservation(Base, SilverRecordMixin):
     units: Mapped[str | None] = mapped_column(String(100), nullable=True)
     frequency: Mapped[str | None] = mapped_column(String(30), nullable=True)
     seasonal_adjustment: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Provider-specific source fields (BLS footnotes/period/preliminary, ...),
+    # so the shared observation model doesn't drop a source's own metadata.
+    source_fields: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class SilverEconomicRelease(Base, SilverRecordMixin):
@@ -296,6 +299,32 @@ class SilverEconomicRelease(Base, SilverRecordMixin):
     actual_published_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     press_release: Mapped[bool | None] = mapped_column(nullable=True)
     link: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
+class SilverBeaValue(Base, SilverRecordMixin):
+    """Normalized BEA table value (§9). Idempotent on
+    (provider, dataset, table_name, line_number, time_period, frequency).
+    Nominal/real/annualized/SA values are distinguished by their table +
+    unit, never merged."""
+
+    __tablename__ = "silver_bea_value"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider", "dataset", "table_name", "line_number", "time_period", "frequency",
+            name="uq_silver_bea_value",
+        ),
+    )
+
+    dataset: Mapped[str] = mapped_column(String(30), index=True)
+    table_name: Mapped[str] = mapped_column(String(40), index=True)
+    line_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    line_description: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    series_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    time_period: Mapped[str] = mapped_column(String(20), index=True)
+    frequency: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    unit: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    scale: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
 
 class SilverSecurityIdentifier(Base, SilverRecordMixin):

@@ -13,10 +13,10 @@ def test_default_settings_are_valid():
 
 
 def test_enabled_but_unimplemented_source_missing_key_does_not_block():
-    # BLS enabled with no key must NOT fail startup (no adapter yet, arrives
-    # in Phase 3) - acceptance criterion 6 (unrelated/optional keys don't
-    # break the app).
-    validate_settings(Settings(enable_bls=True, bls_api_key=""))
+    # Twelve Data enabled with no key must NOT fail startup (no adapter yet,
+    # arrives in Phase 4) - acceptance criterion 6 (unrelated/optional keys
+    # don't break the app).
+    validate_settings(Settings(enable_twelve_data=True, twelve_data_api_key=""))
 
 
 def test_enabled_implemented_source_missing_key_raises():

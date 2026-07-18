@@ -72,6 +72,15 @@ class Settings(BaseSettings):
     # allowance isn't consumed in one run (§5). 0 => no local cap.
     twelve_data_daily_request_budget: int = 0
 
+    # Optional comma-separated override of the BLS series ids to track
+    # (§8: configured, not hardcoded). Empty => use providers/bls.py's
+    # DEFAULT_BLS_SERIES.
+    bls_series_ids: str = ""
+
+    # Optional comma-separated override of the BEA dataset:table:frequency
+    # tuples to track (§9). Empty => providers/bea.py's DEFAULT_BEA_TABLES.
+    bea_tables: str = ""
+
     # Storage. Defaults to a local SQLite file so the app runs without
     # infrastructure in dev; point DATABASE_URL at Postgres in production
     # per the target architecture (§1.1 / §7 of the build spec).
