@@ -129,7 +129,7 @@ SOURCE_REGISTRY: list[SourceDescriptor] = [
         requires_api_key=False,
         license=LicenseClassification.FREE_ATTRIBUTION,
         base_urls=("https://www.nyse.com/markets/hours-calendars",),
-        implemented=False,
+        implemented=True,
         notes="Operationally backed by pandas_market_calendars (already a dependency), validated against the official NYSE schedule.",
     ),
     # --- regulatory ---
@@ -247,6 +247,10 @@ def build_adapter(name: str, settings=None):
         from catalystiq.providers.broker import get_broker_provider
 
         return get_broker_provider()
+    if name == "nyse":
+        from catalystiq.providers.calendars import get_calendar_provider
+
+        return get_calendar_provider()
 
     # Unreachable: every implemented source is handled above. Guard anyway so
     # marking a source implemented without wiring it here fails loudly.

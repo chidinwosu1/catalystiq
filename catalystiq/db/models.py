@@ -23,6 +23,37 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from catalystiq.db.base import Base
 
 
+class SilverRecordMixin:
+    """The common columns every normalized Silver record carries (spec §14),
+    so a downstream consumer can trace, validate, and reproduce any record
+    uniformly regardless of domain. Concrete Silver tables inherit this and
+    add their own domain-specific identity/value columns plus a `payload`.
+
+    `stable_identifier` is the domain's stable key (symbol, FRED series id,
+    CIK, exchange+session-date, ...) - never a value that can be reused or
+    reassigned across entities. `normalization_version` is bumped when a
+    normalizer's field-mapping changes, mirroring adapter/calculation
+    versioning elsewhere."""
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    stable_identifier: Mapped[str] = mapped_column(String(100), index=True)
+    provider: Mapped[str] = mapped_column(String(50))
+    # The source's own record identifier (accession no., observation key, ...).
+    source_record_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # When the datum became available at the source, distinct from when we
+    # retrieved it and from its effective/observation time.
+    source_available_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    effective_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    retrieved_at: Mapped[dt.datetime] = mapped_column(DateTime)
+    bronze_ingestion_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("bronze_ingestion_run.id"), nullable=True
+    )
+    validation_status: Mapped[str] = mapped_column(String(20), default="clean")
+    data_quality_warnings: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    normalization_version: Mapped[str] = mapped_column(String(20), default="1.0.0")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+
 class Ticker(Base):
     __tablename__ = "tickers"
 
@@ -146,9 +177,60 @@ class BronzeMarketQuote(Base):
     ingested_at: Mapped[dt.datetime] = mapped_column(DateTime)
 
 
+class BronzeRawDocument(Base):
+    """Generic append-only store for a raw provider payload from any
+    document/record source (SEC filings & facts, FRED series/observations,
+    the NYSE schedule snapshot, ...). Complements the domain-specific Bronze
+    tables above (BronzeMarketPriceBar/Quote): those predate this and stay
+    as-is; new network/document domains land here instead of getting a
+    bespoke Bronze table each.
+
+    Append-only like all Bronze - a re-ingest writes a new row (new
+    ingestion run), never overwrites a prior payload. `payload_checksum`
+    lets a Silver build detect an unchanged document and skip reprocessing."""
+
+    __tablename__ = "bronze_raw_document"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ingestion_run_id: Mapped[int] = mapped_column(
+        ForeignKey("bronze_ingestion_run.id"), index=True
+    )
+    domain: Mapped[str] = mapped_column(String(50), index=True)
+    # The requested/source identifier this document is for (symbol, CIK,
+    # series id, "NYSE", ...).
+    source_identifier: Mapped[str] = mapped_column(String(100), index=True)
+    document_type: Mapped[str] = mapped_column(String(50))
+    payload: Mapped[dict] = mapped_column(JSON)
+    payload_checksum: Mapped[str] = mapped_column(String(64), index=True)
+    source_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    source_timestamp: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    fetched_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+
 # --- Silver: validated, deduplicated, normalized. Reads only from Bronze.
 # Unique on (ticker, date) - Silver IS the current-best-known clean view,
 # so upserting here on reprocessing is correct (unlike Bronze).
+
+class SilverMarketSession(Base, SilverRecordMixin):
+    """Normalized exchange trading session (§10). The market-calendar Silver
+    product used to decide the latest completed session, whether an intraday
+    candle is complete, and staleness - a real calendar, not a flat 24h
+    rule. Idempotent: upserted on (exchange, session_date)."""
+
+    __tablename__ = "silver_market_session"
+    __table_args__ = (
+        UniqueConstraint("exchange", "session_date", name="uq_silver_market_session"),
+    )
+
+    exchange: Mapped[str] = mapped_column(String(15), index=True)
+    session_date: Mapped[dt.date] = mapped_column(index=True)
+    open_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    close_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    timezone: Mapped[str] = mapped_column(String(40))
+    early_close: Mapped[bool] = mapped_column(default=False)
+    holiday_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    calendar_version: Mapped[str] = mapped_column(String(30))
+
 
 class SilverPriceBar(Base):
     __tablename__ = "silver_price_bar"
