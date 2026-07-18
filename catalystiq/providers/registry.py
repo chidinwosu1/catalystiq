@@ -73,7 +73,7 @@ SOURCE_REGISTRY: list[SourceDescriptor] = [
         requires_api_key=True,
         license=LicenseClassification.FREE_PERSONAL,
         base_urls=("https://api.twelvedata.com",),
-        implemented=False,
+        implemented=True,
         notes="Optional secondary/validation source. Disabled by default; free-tier only, not redistributable.",
     ),
     # --- fundamentals ---
@@ -275,6 +275,10 @@ def build_adapter(name: str, settings=None):
         from catalystiq.providers.nasdaq_trader import get_nasdaq_trader_provider
 
         return get_nasdaq_trader_provider()
+    if name == "twelve_data":
+        from catalystiq.providers.twelve_data import get_twelve_data_provider
+
+        return get_twelve_data_provider()
 
     # Unreachable: every implemented source is handled above. Guard anyway so
     # marking a source implemented without wiring it here fails loudly.

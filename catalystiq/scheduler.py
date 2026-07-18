@@ -1,11 +1,13 @@
-"""Executes due scheduled orders (§1.1 Execution Zone / Rules Engine's
-periodic re-run, per the scheduler/workers line in the build spec).
+"""Marks due scheduled orders ready for manual review - it does NOT submit
+them (§13).
 
-`get_broker` is injected from `catalystiq.providers.broker.get_broker_provider`
-(see catalystiq/main.py's lifespan), which always resolves to WebullBroker -
-so every scheduled order submitted here goes through
-BrokerProvider -> WebullBroker -> Webull Trading API, with no other broker
-in the path.
+Order submission never happens automatically. When a scheduled order's time
+passes, this poller flips it from `pending` to `due` so the UI can surface it
+(a notification / a prepared Trade Ticket draft) for a human to review and
+explicitly confirm via the confirm+submit flow. Actual submission always
+requires the paper-submission flag to be on AND a single-use confirmation
+token bound to the exact order details (see catalystiq/routers/broker.py and
+catalystiq/orders.py).
 
 This is an in-process poller, not a real task queue (no Celery/Redis) - it
 only runs while this FastAPI process is alive. See catalystiq/main.py's
@@ -20,17 +22,16 @@ import logging
 from sqlalchemy.orm import Session
 
 from catalystiq.db import models
-from catalystiq.providers.broker import BrokerError, BrokerProvider
-from catalystiq.schemas.broker import NewOrder
 
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL_SECONDS = 15
 
 
-def run_due_scheduled_orders(db: Session, broker: BrokerProvider) -> list[models.ScheduledOrder]:
-    """Submits every pending, due ScheduledOrder through `broker`. Returns the
-    rows it touched (now updated to submitted/failed) for callers/tests."""
+def run_due_scheduled_orders(db: Session) -> list[models.ScheduledOrder]:
+    """Flip every pending, due ScheduledOrder to `due` (ready for manual
+    review). NEVER submits an order. Returns the rows it touched so a caller
+    can surface a notification/draft for each."""
     now = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
     due = (
         db.query(models.ScheduledOrder)
@@ -42,39 +43,23 @@ def run_due_scheduled_orders(db: Session, broker: BrokerProvider) -> list[models
     )
 
     for row in due:
-        try:
-            order = NewOrder(**row.order_json)
-            result = broker.submit_order(order)
-            row.status = "submitted"
-            row.broker_order_id = str(result.get("id")) if isinstance(result, dict) else None
-        except Exception as exc:  # broker rejection, bad stored payload, etc.
-            row.status = "failed"
-            row.error_detail = str(exc)
+        row.status = "due"
 
     if due:
         db.commit()
     return due
 
 
-async def scheduler_loop(session_factory, get_broker) -> None:
+async def scheduler_loop(session_factory) -> None:
     """Runs run_due_scheduled_orders on a fixed interval until cancelled.
-
-    `session_factory`/`get_broker` are injected (not imported directly) so
-    this loop is trivially testable without a running event loop needing a
-    real broker/DB.
-    """
+    `session_factory` is injected so the loop is trivially testable."""
     while True:
         try:
             db = session_factory()
             try:
-                broker = get_broker()
-                run_due_scheduled_orders(db, broker)
+                run_due_scheduled_orders(db)
             finally:
                 db.close()
-        except BrokerError:
-            # Broker isn't configured (yet) - retry next cycle rather than
-            # crashing the loop or discarding the queued orders.
-            pass
         except Exception:  # pragma: no cover - defensive, keeps the loop alive
             logger.exception("Scheduled-order poll failed")
 

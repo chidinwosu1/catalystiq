@@ -82,12 +82,17 @@ def test_build_adapter_unconfigured_source_raises_config_error():
     assert exc.value.category is ProviderErrorCategory.CONFIG
 
 
-def test_build_adapter_unimplemented_source_raises_config_error():
-    # Twelve Data is registered but has no adapter yet (arrives in Phase 4).
+def test_build_adapter_unimplemented_source_raises_config_error(monkeypatch):
+    # All real sources are implemented now; exercise the defensive
+    # "registered but not implemented" branch with a synthetic descriptor.
+    from catalystiq.providers.base import DataDomain
+
+    fake = registry.SourceDescriptor(
+        name="__fake__", domain=DataDomain.MARKET_DATA, enable_setting=None, implemented=False
+    )
+    monkeypatch.setitem(registry._BY_NAME, "__fake__", fake)
     with pytest.raises(ProviderError) as exc:
-        registry.build_adapter(
-            "twelve_data", Settings(enable_twelve_data=True, twelve_data_api_key="dummy")
-        )
+        registry.build_adapter("__fake__", Settings())
     assert exc.value.category is ProviderErrorCategory.CONFIG
     assert "not implemented" in str(exc.value).lower()
 

@@ -258,16 +258,37 @@ is implemented. `validate_settings()` runs at startup and raises a
 values**. See `.env.example` for the full list (placeholders only; real
 secrets belong in your local `.env` / host environment, never in git).
 
-Implemented today: **Yahoo Finance** (market data, initial primary),
-**Webull** (brokerage; read-only, order submission stays disabled),
-**NYSE** market calendar, **FRED/ALFRED** (macro, point-in-time vintages),
-**SEC EDGAR** (fundamentals: filings, XBRL company facts, 8-K material
-events), **BLS** (macro, normalized into the shared observation model),
-**BEA** (macro tables), **FINRA** (short interest + daily short-sale volume,
-kept as separate datasets), and **Nasdaq Trader** (symbol directory /
-security master). Only **Twelve Data** remains for a later phase (optional
-secondary market data); it's registered and reported by config/health
-surfaces but its adapter isn't wired yet.
+All ten sources are implemented: **Yahoo Finance** (market data, initial
+primary), **Twelve Data** (optional secondary / validation, off by default),
+**Webull** (brokerage; read-only), **NYSE** market calendar, **FRED/ALFRED**
++ **BLS** + **BEA** (macro), **SEC EDGAR** (fundamentals), and **FINRA** +
+**Nasdaq Trader** (regulatory).
+
+**Cross-provider validation (§5, §16).** When Twelve Data is enabled, a
+comparison sample fetches the same quote from Yahoo (primary) and Twelve Data
+(secondary) and records a `provider_comparison` row: both values, their
+difference, whether it's within tolerance, and which was selected and why.
+Values are never averaged and the secondary never silently overwrites the
+primary; a difference beyond `PROVIDER_COMPARISON_TOLERANCE_PCT` is flagged.
+`POST /data-quality/market_data/compare/{symbol}`, `GET /data-quality/{domain}`.
+A configured-only Yahoo-outage fallback (`MARKET_DATA_FALLBACK_ENABLED`) is
+available; the primary is never pre-emptively replaced.
+
+**Order submission is disabled by default (§13).** Paper and live are
+separate flags with separate credentials; **live is refused until separately
+approved** (even if its flag is set). When paper submission is enabled, every
+order is a two-step flow: `POST /paper/orders/confirm` returns the exact
+details to review (symbol, side, qty/notional, type, limit/stop, **estimated
+max loss**, account) plus a **single-use, short-lived confirmation token**
+bound to those details; `POST /paper/orders` submits only with a valid token
+and consumes it — any change to the order invalidates it. The scheduled-order
+poller **never auto-submits**: it flips a due order to `due` for manual
+review. `GET /paper/connection-test` is a read-only Webull reachability check.
+
+**Health/admin surfaces (§18):** `GET /data-sources`, `/data-sources/health`,
+`/data-sources/{provider}/health` — enabled/configured state, last successful
+ingestion, last failure category, and freshness, with **setting names only,
+never secret values**.
 
 New network/document domains flow through a generic Bronze store
 (`BronzeRawDocument`) and the `pipelines/ingestion.py` helpers, then into

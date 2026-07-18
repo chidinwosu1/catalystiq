@@ -26,6 +26,23 @@ class Settings(BaseSettings):
     webull_api_endpoint: str = ""
     webull_token_dir: str = ""
 
+    # --- Order submission gating (§13) -------------------------------
+    # Order submission is DISABLED by default. Paper and live are separate
+    # flags with separate credentials; live stays unavailable until
+    # separately approved (assert_submission_allowed in the broker router
+    # refuses live even if its flag is set).
+    trading_mode: str = "paper"  # paper | live
+    enable_paper_order_submission: bool = False
+    enable_live_order_submission: bool = False
+    # Secret for the per-order confirmation HMAC. Submission stays refused
+    # until this is set (no secret => no valid tokens can be minted).
+    order_confirmation_secret: str = ""
+    order_confirmation_ttl_seconds: int = 300
+    # Separate live-trading credentials (unused until live is approved).
+    webull_live_app_key: str = ""
+    webull_live_app_secret: str = ""
+    webull_live_account_id: str = ""
+
     # Market data provider (legacy single-provider knob, kept for the
     # existing get_market_data_provider() factory). The primary/secondary
     # settings below are the forward-looking source-priority controls (§16).
@@ -80,6 +97,16 @@ class Settings(BaseSettings):
     # Optional comma-separated override of the BEA dataset:table:frequency
     # tuples to track (§9). Empty => providers/bea.py's DEFAULT_BEA_TABLES.
     bea_tables: str = ""
+
+    # Cross-provider price comparison tolerance (§16): a relative difference
+    # above this (percent) between the primary and secondary provider raises
+    # a data-quality warning. Values are never averaged.
+    provider_comparison_tolerance_pct: float = 0.5
+
+    # Yahoo-outage fallback to the secondary market-data provider - only used
+    # when explicitly enabled (§5). Off by default; the primary is never
+    # silently replaced.
+    market_data_fallback_enabled: bool = False
 
     # Storage. Defaults to a local SQLite file so the app runs without
     # infrastructure in dev; point DATABASE_URL at Postgres in production

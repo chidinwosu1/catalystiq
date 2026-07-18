@@ -989,6 +989,52 @@ class ScheduledOrder(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime)
 
 
+class ProviderComparison(Base):
+    """A cross-provider validation result (§5, §16): the primary and
+    secondary providers' values for the same field, their difference, and
+    which was selected and why. Values are recorded, never averaged; an
+    out-of-tolerance row IS the data-quality warning."""
+
+    __tablename__ = "provider_comparison"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    domain: Mapped[str] = mapped_column(String(30), index=True)
+    symbol: Mapped[str] = mapped_column(String(15), index=True)
+    field: Mapped[str] = mapped_column(String(30))  # quote_price | close
+    as_of_date: Mapped[dt.date | None] = mapped_column(nullable=True)
+    primary_provider: Mapped[str] = mapped_column(String(30))
+    primary_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    primary_timestamp: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    secondary_provider: Mapped[str] = mapped_column(String(30))
+    secondary_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    secondary_timestamp: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    absolute_diff: Mapped[float | None] = mapped_column(Float, nullable=True)
+    relative_diff_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tolerance_pct: Mapped[float] = mapped_column(Float)
+    within_tolerance: Mapped[bool] = mapped_column(default=True, index=True)
+    selected_provider: Mapped[str] = mapped_column(String(30))
+    selected_reason: Mapped[str] = mapped_column(String(300))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, index=True)
+
+
+class OrderConfirmationToken(Base):
+    """A single-use, short-lived confirmation token bound to exact order
+    details (§13). Submission consumes it (sets used_at); a replay or a
+    parameter change is rejected. See catalystiq/orders.py."""
+
+    __tablename__ = "order_confirmation_token"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    jti: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    fingerprint: Mapped[str] = mapped_column(String(1000))
+    account_id: Mapped[str] = mapped_column(String(100))
+    mode: Mapped[str] = mapped_column(String(10))  # paper | live
+    estimated_max_loss: Mapped[float | None] = mapped_column(Float, nullable=True)
+    expires_at: Mapped[dt.datetime] = mapped_column(DateTime)
+    used_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+
 class Report(Base):
     __tablename__ = "reports"
 

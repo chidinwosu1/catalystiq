@@ -355,6 +355,18 @@ class WebullBroker(BrokerProvider):
         response = self._trade_client.order_v3.get_order_open(self._account_id)
         return self._check_response(response)
 
+    def connection_test(self) -> dict:
+        """Read-only reachability check (§13): performs a lightweight open-
+        orders read and reports ok/failure without exposing any credential.
+        Never places, cancels, or modifies an order."""
+        try:
+            self._trade_client.order_v3.get_order_open(self._account_id)
+            return {"provider": "webull", "ok": True, "detail": "reachable (read-only)"}
+        except BrokerError as exc:
+            return {"provider": "webull", "ok": False, "detail": str(exc)}
+        except Exception as exc:  # pragma: no cover - network/library errors
+            return {"provider": "webull", "ok": False, "detail": f"{type(exc).__name__}"}
+
     def submit_order(self, order: NewOrder) -> dict:
         webull_order = self._to_webull_order(order)
         response = self._trade_client.order_v3.place_order(self._account_id, [webull_order])

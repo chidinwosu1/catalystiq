@@ -12,11 +12,10 @@ def test_default_settings_are_valid():
     validate_settings(Settings())
 
 
-def test_enabled_but_unimplemented_source_missing_key_does_not_block():
-    # Twelve Data enabled with no key must NOT fail startup (no adapter yet,
-    # arrives in Phase 4) - acceptance criterion 6 (unrelated/optional keys
-    # don't break the app).
-    validate_settings(Settings(enable_twelve_data=True, twelve_data_api_key=""))
+def test_disabled_source_missing_key_does_not_block():
+    # A DISABLED source with no key must NOT fail startup - acceptance
+    # criterion 6 (unrelated/optional keys don't break the app).
+    validate_settings(Settings(enable_bea=False, bea_api_key=""))
 
 
 def test_enabled_implemented_source_missing_key_raises():

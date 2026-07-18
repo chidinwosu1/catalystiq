@@ -7,11 +7,13 @@ from fastapi.responses import JSONResponse
 
 from catalystiq.config import get_settings, validate_settings
 from catalystiq.db.base import SessionLocal
-from catalystiq.providers.broker import BrokerError, get_broker_provider
+from catalystiq.providers.broker import BrokerError
 from catalystiq.routers import (
     analysis,
     broker,
     calendar,
+    data_quality,
+    data_sources,
     fundamentals,
     macro,
     market_data,
@@ -28,7 +30,7 @@ async def lifespan(app: FastAPI):
     # ConfigurationError listing offending setting names only, never values.
     validate_settings(settings)
     tasks = [
-        asyncio.create_task(scheduler_loop(SessionLocal, get_broker_provider)),
+        asyncio.create_task(scheduler_loop(SessionLocal)),
         asyncio.create_task(
             reference_validation_loop(
                 SessionLocal,
@@ -64,6 +66,8 @@ app.include_router(calendar.router)
 app.include_router(macro.router)
 app.include_router(fundamentals.router)
 app.include_router(regulatory.router)
+app.include_router(data_quality.router)
+app.include_router(data_sources.router)
 
 
 @app.exception_handler(BrokerError)
