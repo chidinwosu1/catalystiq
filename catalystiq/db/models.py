@@ -426,6 +426,74 @@ class SilverMaterialEvent(Base, SilverRecordMixin):
     source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
 
+class SilverSecurityMaster(Base, SilverRecordMixin):
+    """Security master / symbol directory (§12, §14 #1). Keyed on a stable
+    internal security id, NOT the ticker alone (tickers can change or be
+    reused). Idempotent on (provider, internal_security_id)."""
+
+    __tablename__ = "silver_security_master"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider", "internal_security_id", name="uq_silver_security_master"
+        ),
+    )
+
+    internal_security_id: Mapped[str] = mapped_column(String(60), index=True)
+    symbol: Mapped[str] = mapped_column(String(15), index=True)
+    name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    exchange: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    listing_market: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    etf: Mapped[bool | None] = mapped_column(nullable=True)
+    test_issue: Mapped[bool | None] = mapped_column(nullable=True)
+    is_active: Mapped[bool] = mapped_column(default=True)
+
+
+class SilverShortSaleVolume(Base, SilverRecordMixin):
+    """Daily short-sale volume (§11) - a SEPARATE dataset from short interest.
+    Idempotent on (provider, symbol, trade_date, reporting_facility,
+    file_version); file_version is in the key so a corrected file is
+    preserved alongside the original."""
+
+    __tablename__ = "silver_short_sale_volume"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider", "symbol", "trade_date", "reporting_facility", "file_version",
+            name="uq_silver_short_sale_volume",
+        ),
+    )
+
+    symbol: Mapped[str] = mapped_column(String(15), index=True)
+    trade_date: Mapped[dt.date] = mapped_column(index=True)
+    short_volume: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    short_exempt_volume: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_volume: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reporting_facility: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    file_version: Mapped[str] = mapped_column(String(20), default="original")
+
+
+class SilverShortInterest(Base, SilverRecordMixin):
+    """Semi-monthly equity short interest (§11) - a SEPARATE dataset from
+    daily short-sale volume; the two are never conflated. Idempotent on
+    (provider, symbol, settlement_date, file_version)."""
+
+    __tablename__ = "silver_short_interest"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider", "symbol", "settlement_date", "file_version",
+            name="uq_silver_short_interest",
+        ),
+    )
+
+    symbol: Mapped[str] = mapped_column(String(15), index=True)
+    settlement_date: Mapped[dt.date] = mapped_column(index=True)
+    publication_date: Mapped[dt.date | None] = mapped_column(nullable=True)
+    short_interest_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    previous_short_interest_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    average_daily_volume: Mapped[float | None] = mapped_column(Float, nullable=True)
+    days_to_cover: Mapped[float | None] = mapped_column(Float, nullable=True)
+    file_version: Mapped[str] = mapped_column(String(20), default="original")
+
+
 class SilverPriceBar(Base):
     __tablename__ = "silver_price_bar"
     __table_args__ = (UniqueConstraint("ticker_id", "date", name="uq_silver_price_bar_ticker_date"),)

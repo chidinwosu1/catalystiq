@@ -15,6 +15,7 @@ from catalystiq.routers import (
     fundamentals,
     macro,
     market_data,
+    regulatory,
 )
 from catalystiq.scheduler import scheduler_loop
 from catalystiq.validation.reference.scheduler import reference_validation_loop
@@ -62,6 +63,7 @@ app.include_router(analysis.router)
 app.include_router(calendar.router)
 app.include_router(macro.router)
 app.include_router(fundamentals.router)
+app.include_router(regulatory.router)
 
 
 @app.exception_handler(BrokerError)

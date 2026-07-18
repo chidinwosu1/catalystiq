@@ -140,7 +140,7 @@ SOURCE_REGISTRY: list[SourceDescriptor] = [
         requires_api_key=False,
         license=LicenseClassification.FREE_ATTRIBUTION,
         base_urls=("https://api.finra.org", "https://cdn.finra.org"),
-        implemented=False,
+        implemented=True,
         notes="Equity short interest and daily short-sale volume kept as separate datasets.",
     ),
     SourceDescriptor(
@@ -150,7 +150,7 @@ SOURCE_REGISTRY: list[SourceDescriptor] = [
         requires_api_key=False,
         license=LicenseClassification.FREE_ATTRIBUTION,
         base_urls=("https://www.nasdaqtrader.com/dynamic/SymDir", "http://www.nasdaqtrader.com"),
-        implemented=False,
+        implemented=True,
         notes="Symbol directory + reference datasets. Normalize to stable internal security ids, not raw tickers.",
     ),
     # --- brokerage ---
@@ -267,6 +267,14 @@ def build_adapter(name: str, settings=None):
         from catalystiq.providers.bea import get_bea_provider
 
         return get_bea_provider()
+    if name == "finra":
+        from catalystiq.providers.finra import get_finra_provider
+
+        return get_finra_provider()
+    if name == "nasdaq_trader":
+        from catalystiq.providers.nasdaq_trader import get_nasdaq_trader_provider
+
+        return get_nasdaq_trader_provider()
 
     # Unreachable: every implemented source is handled above. Guard anyway so
     # marking a source implemented without wiring it here fails loudly.

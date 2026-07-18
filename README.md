@@ -261,10 +261,13 @@ secrets belong in your local `.env` / host environment, never in git).
 Implemented today: **Yahoo Finance** (market data, initial primary),
 **Webull** (brokerage; read-only, order submission stays disabled),
 **NYSE** market calendar, **FRED/ALFRED** (macro, point-in-time vintages),
-and **SEC EDGAR** (fundamentals: filings, XBRL company facts, 8-K material
-events). The remaining sources (Twelve Data, BLS, BEA, FINRA, Nasdaq Trader)
-are registered and reported by config/health surfaces but their adapters
-arrive in later phases.
+**SEC EDGAR** (fundamentals: filings, XBRL company facts, 8-K material
+events), **BLS** (macro, normalized into the shared observation model),
+**BEA** (macro tables), **FINRA** (short interest + daily short-sale volume,
+kept as separate datasets), and **Nasdaq Trader** (symbol directory /
+security master). Only **Twelve Data** remains for a later phase (optional
+secondary market data); it's registered and reported by config/health
+surfaces but its adapter isn't wired yet.
 
 New network/document domains flow through a generic Bronze store
 (`BronzeRawDocument`) and the `pipelines/ingestion.py` helpers, then into
@@ -279,8 +282,17 @@ amended SEC filing's facts are preserved alongside the originals, with the
 latest-filed value surfaced as active.
 
 Read-only endpoints: `GET /market-calendar/sessions`, `GET /macro/series/{id}`,
-`GET /macro/series/{id}/observations?as_of=`, `GET /macro/releases`,
-`GET /fundamentals/{symbol}`, `GET /filings/{symbol}`.
+`GET /macro/series/{id}/observations?as_of=&source=fred|bls`,
+`GET /macro/releases`, `GET /macro/bea?table=`, `GET /fundamentals/{symbol}`,
+`GET /filings/{symbol}`, `GET /short-interest/{symbol}`,
+`GET /short-sale-volume/{symbol}`.
+
+Phase 3 Silver products added: `silver_bea_value`, `silver_short_sale_volume`
+/ `silver_short_interest` (separate datasets; a corrected FINRA file is kept
+alongside the original via `file_version`), and `silver_security_master`
+(keyed on a stable internal security id, not the reusable ticker). BLS
+observations reuse `silver_macro_observation`, preserving BLS-specific fields
+(period code, footnotes, preliminary flag) in a `source_fields` column.
 
 ## Reference-calculation adapter
 
