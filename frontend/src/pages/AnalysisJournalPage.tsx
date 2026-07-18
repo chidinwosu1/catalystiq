@@ -18,6 +18,7 @@ import NextAction from "../components/NextAction";
 import { getDemoAnalysis, getDemoSetup } from "../mockAnalysisDetail";
 import BehavioralAnalysisTable from "../components/BehavioralAnalysisTable";
 import ConvictionOpportunities from "../components/dashboard/ConvictionOpportunities";
+import WorkflowBar from "../components/trade/WorkflowBar";
 import { getStockBehavioralAnalysis } from "../mockBehavioralData";
 import type { PageId } from "../types/nav";
 
@@ -244,6 +245,7 @@ export default function AnalysisJournalPage({
 
   return (
     <div className="space-y-6">
+      <WorkflowBar current={3} onNavigate={onNavigate} />
       <div>
         <h1 className="text-xl font-semibold text-ink-primary">Investment Strategy</h1>
         <p className="mt-1 text-sm text-ink-secondary">

@@ -2,6 +2,7 @@ import { useState } from "react";
 import Header from "./components/Header";
 import Disclaimer from "./components/Disclaimer";
 import HomePage from "./pages/HomePage";
+import PreferencesPage from "./pages/PreferencesPage";
 import TradeCenterPage from "./pages/TradeCenterPage";
 import TradeTicketPage from "./pages/TradeTicketPage";
 import PortfolioPage from "./pages/PortfolioPage";
@@ -34,6 +35,7 @@ function App() {
         {activePage === "home" && (
           <HomePage onNavigate={setActivePage} onViewAnalysis={goToAnalysis} />
         )}
+        {activePage === "preferences" && <PreferencesPage onNavigate={setActivePage} />}
         {activePage === "trade" && (
           <TradeCenterPage
             onTrade={goToTicket}
@@ -56,7 +58,11 @@ function App() {
           />
         )}
         {activePage === "markets" && (
-          <MarketIntelligencePage onTrade={goToTicket} onViewAnalysis={goToAnalysis} />
+          <MarketIntelligencePage
+            onTrade={goToTicket}
+            onViewAnalysis={goToAnalysis}
+            onNavigate={setActivePage}
+          />
         )}
         {activePage === "analysis" && (
           <AnalysisJournalPage

@@ -2,7 +2,14 @@
 // intentionally not in the primary nav: Market Overview opens as a slide-out
 // inside the Trade Center, and the order ticket is reached as the "Confirm
 // Trade" step from an opportunity or from Investment Strategy.
-export type PageId = "home" | "trade" | "portfolio" | "markets" | "analysis" | "ticket";
+export type PageId =
+  | "home"
+  | "trade"
+  | "portfolio"
+  | "markets"
+  | "analysis"
+  | "ticket"
+  | "preferences";
 
 export interface PageDescriptor {
   id: PageId;

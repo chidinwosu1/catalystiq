@@ -8,7 +8,7 @@ import type { PageId } from "../../types/nav";
  * after preview what's ahead.
  */
 const WORKFLOW_STEPS: { label: string; page: PageId }[] = [
-  { label: "Define preferences", page: "home" },
+  { label: "Define preferences", page: "preferences" },
   { label: "Scan the market", page: "markets" },
   { label: "Review opportunities", page: "trade" },
   { label: "Build strategy", page: "analysis" },

@@ -5,6 +5,7 @@ import SectionCard from "../components/SectionCard";
 import StatTile from "../components/StatTile";
 import DemoBadge from "../components/DemoBadge";
 import NextAction from "../components/NextAction";
+import WorkflowBar from "../components/trade/WorkflowBar";
 import type { PageId } from "../types/nav";
 
 interface PortfolioPageProps {
@@ -66,6 +67,7 @@ export default function PortfolioPage({
 
   return (
     <div className="space-y-6">
+      <WorkflowBar current={5} onNavigate={onNavigate} />
       <div>
         <h1 className="text-xl font-semibold text-ink-primary">Portfolio</h1>
         <p className="mt-1 text-sm text-ink-secondary">
