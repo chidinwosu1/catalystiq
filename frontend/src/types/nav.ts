@@ -1,4 +1,8 @@
-export type PageId = "home" | "trade" | "portfolio" | "markets" | "analysis";
+// "markets" (Market Overview) and "ticket" (order entry) are real pages but
+// intentionally not in the primary nav: Market Overview opens as a slide-out
+// inside the Trade Center, and the order ticket is reached as the "Confirm
+// Trade" step from an opportunity or from Investment Strategy.
+export type PageId = "home" | "trade" | "portfolio" | "markets" | "analysis" | "ticket";
 
 export interface PageDescriptor {
   id: PageId;
@@ -6,8 +10,7 @@ export interface PageDescriptor {
   description: string;
 }
 
-// Ordered to follow the investment workflow: get the market read, form a
-// strategy, place the trade, then manage the book.
+// Primary navigation — the investing workflow: discover, evaluate, decide, manage.
 export const PAGES: PageDescriptor[] = [
   {
     id: "home",
@@ -16,22 +19,16 @@ export const PAGES: PageDescriptor[] = [
       "The Catalyst IQ overview - what it is, how it works, what powers it, and where to start.",
   },
   {
-    id: "markets",
-    label: "Market Analysis",
+    id: "trade",
+    label: "Trade Center",
     description:
-      "The daily macro dashboard - index levels, sector ranking, catalysts, and investor behavior analysis.",
+      "Discover and compare today's highest-conviction opportunities, with the market read a slide-out away.",
   },
   {
     id: "analysis",
     label: "Investment Strategy",
     description:
-      "Today's highest-conviction opportunities, per-ticker research, and your own trade journal and performance.",
-  },
-  {
-    id: "trade",
-    label: "Trade",
-    description:
-      "Build and submit a paper order - real backend, all order types, optional bracket exits and scheduled execution.",
+      "Turn an opportunity into a personalized strategy: research, journal, and your own performance.",
   },
   {
     id: "portfolio",

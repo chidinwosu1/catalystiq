@@ -122,10 +122,10 @@ const OFFERS: Offer[] = [
     page: "markets",
   },
   {
-    title: "AI That Explains Itself",
+    title: "Intelligence That Explains Itself",
     lead: "See the why, not just the what.",
     detail:
-      "Artificial intelligence surfaces each opportunity and shows the evidence behind the score — never a black box.",
+      "The model surfaces each opportunity and shows the evidence behind the score — never a black box.",
     icon: Sparkles,
     page: "analysis",
   },
@@ -260,14 +260,15 @@ export default function HomePage({ onNavigate }: HomePageProps) {
             Market intelligence · updated continuously
           </span>
           <h1 className="mx-auto mt-3.5 max-w-[17ch] text-[clamp(30px,4.8vw,52px)] font-extrabold leading-[1.05] tracking-[-0.035em] text-balance text-ink-primary">
-            Invest smarter.{" "}
+            Stop guessing.{" "}
             <span className="bg-gradient-to-r from-[#5ea8ff] to-brand-blue bg-clip-text text-transparent">
-              Decide with confidence.
+              Start investing with evidence.
             </span>
           </h1>
-          <p className="mx-auto mt-3.5 max-w-[58ch] text-[clamp(14.5px,1.6vw,17px)] text-ink-secondary">
-            Hundreds of independent market signals — technicals, macro, investor psychology, and AI
-            — weighed into high-conviction opportunities backed by evidence, not a single opinion.
+          <p className="mx-auto mt-3.5 max-w-[60ch] text-[clamp(14.5px,1.6vw,17px)] text-ink-secondary">
+            Technical signals, macroeconomic data, investor psychology, and machine learning —
+            combined into one investment-intelligence platform, so every opportunity is backed by
+            evidence, not a single opinion.
           </p>
           <div className="mt-7 flex flex-wrap justify-center gap-3">
             <button
@@ -284,7 +285,7 @@ export default function HomePage({ onNavigate }: HomePageProps) {
               style={{ paddingLeft: "1.375rem", paddingRight: "1.375rem" }}
             >
               <Clock size={17} />
-              Explore Today's Opportunities
+              Discover Market Opportunities
             </button>
           </div>
         </div>

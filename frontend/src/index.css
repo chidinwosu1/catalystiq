@@ -154,6 +154,43 @@ body {
   transform: rotateY(180deg);
 }
 
+/* Slide-out review panel */
+.cq-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: min(540px, 100%);
+  transform: translateX(100%);
+  transition:
+    transform 0.4s cubic-bezier(0.2, 0.7, 0.2, 1),
+    width 0.4s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.cq-panel.is-open {
+  transform: translateX(0);
+}
+.cq-panel.is-full {
+  width: min(1080px, 100%);
+}
+/* Left-docked variant (market context) */
+.cq-panel.cq-left {
+  left: 0;
+  right: auto;
+  transform: translateX(-100%);
+}
+.cq-panel.cq-left.is-open {
+  transform: translateX(0);
+}
+.cq-backdrop {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+.cq-backdrop.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cq-marquee,
   .cq-pulse {
@@ -165,6 +202,10 @@ body {
     transition: none;
   }
   .cq-flip-inner {
+    transition: none;
+  }
+  .cq-panel,
+  .cq-backdrop {
     transition: none;
   }
 }
