@@ -11,9 +11,9 @@ export interface PageDescriptor {
 export const PAGES: PageDescriptor[] = [
   {
     id: "home",
-    label: "Command Center",
+    label: "Home",
     description:
-      "Your investment command center - today's market read, catalysts, alerts, and what to do next.",
+      "The Catalyst IQ overview - what it is, how it works, what powers it, and where to start.",
   },
   {
     id: "markets",
