@@ -130,6 +130,11 @@ catalystiq/
     base.py             # engine/session (defaults to local SQLite)
     models.py            # ORM models (§7 schema)
   providers/
+    base.py               # provider vocabulary: DataDomain, DataClassification,
+                           # IngestionStatus, ProviderError/category, adapter identity
+    registry.py            # data-driven source registry + config-gated factory
+    transport.py           # shared HTTP client: timeouts, retry+backoff+jitter,
+                            # token-bucket rate limiter, circuit breaker, secret redaction
     market_data.py       # MarketDataProvider ABC + YahooFinanceProvider
     broker.py              # BrokerProvider ABC + WebullBroker (sole active broker;
                             # AlpacaPaperBroker also lives here as a disabled legacy adapter)
@@ -215,6 +220,48 @@ not a pattern to ship.
   `POST /paper/orders`, `GET /paper/orders/{id}`, `DELETE /paper/orders/{id}`
 
 All of the above require `Authorization: Bearer <ACTION_API_KEY>`.
+
+## Data-source integration (foundation)
+
+External data always flows **Provider → Bronze → Silver → Gold**; Gold
+compute functions never call a provider directly (enforced today in
+`pipelines/market_price_pipeline.py`). The `providers/` package is the
+foundation for extending this beyond the market-price domain:
+
+- **`base.py`** — one shared vocabulary every adapter uses: `DataDomain`,
+  `DataClassification` (real-time / delayed / end-of-day / revised),
+  `IngestionStatus` (`running`/`succeeded`/`partial`/`failed`/`rate_limited`/
+  `unavailable`), `LicenseClassification`, and a normalized
+  `ProviderError` + `ProviderErrorCategory`. Adapters declare identity via
+  `PROVIDER_NAME` / `ADAPTER_VERSION` / `DOMAIN`.
+- **`registry.py`** — every planned source described as data (domain,
+  required setting *names*, enable flag, license class, base URLs,
+  `implemented`), plus `build_adapter(name)`: a single config-gated factory
+  that raises a `CONFIG`-category `ProviderError` for an unknown, disabled,
+  unconfigured, or not-yet-implemented source instead of failing obscurely.
+- **`transport.py`** — the shared HTTP client for the REST-based adapters
+  added in later phases (SEC, FRED, BLS, BEA, FINRA, Nasdaq, Twelve Data):
+  explicit connect/read timeouts, bounded retries with exponential backoff +
+  jitter, a token-bucket rate limiter, a circuit breaker, and secret
+  redaction. Fully unit-testable (clock/sleep/jitter injected) — no live
+  calls in the suite.
+
+`BronzeIngestionRun` now carries domain-agnostic ingestion fields (dataset,
+endpoint, requested identifier, response/release timestamps, HTTP status,
+record count, rate-limit info, retry count, error category, payload checksum
+/ reference, license class) so one table records ingestion for every domain.
+
+**Configuration.** Each source has an `ENABLE_*` flag and, where needed, an
+API key; a key is required only when its source is enabled *and* its adapter
+is implemented. `validate_settings()` runs at startup and raises a
+`ConfigurationError` naming any missing setting — **names only, never
+values**. See `.env.example` for the full list (placeholders only; real
+secrets belong in your local `.env` / host environment, never in git).
+
+Implemented today: **Yahoo Finance** (market data, initial primary) and
+**Webull** (brokerage; read-only, order submission stays disabled). The
+other sources are registered and reported by config/health surfaces but
+their adapters arrive in later phases.
 
 ## Reference-calculation adapter
 

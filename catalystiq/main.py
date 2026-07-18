@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from catalystiq.config import get_settings
+from catalystiq.config import get_settings, validate_settings
 from catalystiq.db.base import SessionLocal
 from catalystiq.providers.broker import BrokerError, get_broker_provider
 from catalystiq.routers import analysis, broker, market_data
@@ -16,6 +16,9 @@ from catalystiq.validation.reference.scheduler import reference_validation_loop
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    # Fail fast on an enabled-but-misconfigured data source (§2). Raises
+    # ConfigurationError listing offending setting names only, never values.
+    validate_settings(settings)
     tasks = [
         asyncio.create_task(scheduler_loop(SessionLocal, get_broker_provider)),
         asyncio.create_task(

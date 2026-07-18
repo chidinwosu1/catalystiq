@@ -8,6 +8,7 @@ sqlalchemy
 alembic
 psycopg2-binary
 yfinance
+httpx  # shared HTTP transport for network-backed provider adapters (catalystiq/providers/transport.py)
 pandas
 pandas_market_calendars
 scipy
@@ -15,4 +16,3 @@ TA-Lib==0.7.1  # pinned - reference-calculation adapter (catalystiq/validation/r
 
 # dev / test
 pytest
-httpx

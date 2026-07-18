@@ -22,6 +22,7 @@ from __future__ import annotations
 import uuid
 from abc import ABC, abstractmethod
 
+from catalystiq.providers.base import DataDomain
 from catalystiq.schemas.broker import AccountInfo, NewOrder, Position
 
 
@@ -259,6 +260,12 @@ class WebullBroker(BrokerProvider):
     non-CORE `support_trading_session` value isn't confirmed; and `fok`
     time-in-force - Webull's `OrderTIF` enum only has DAY/GTC/IOC.
     """
+
+    # Provider identity, per the ProviderAdapter contract
+    # (catalystiq/providers/base.py).
+    PROVIDER_NAME = "webull"
+    ADAPTER_VERSION = "1.0.0"
+    DOMAIN = DataDomain.BROKERAGE
 
     # From webull.trade.common.order_type.OrderType / order_tif.OrderTIF.
     _ORDER_TYPE = {

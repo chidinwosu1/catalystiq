@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime as dt
 from abc import ABC, abstractmethod
 
+from catalystiq.providers.base import DataDomain
 from catalystiq.schemas.market_data import (
     FundamentalsSnapshot,
     NewsItem,
@@ -49,6 +50,12 @@ class MarketDataError(RuntimeError):
 
 class YahooFinanceProvider(MarketDataProvider):
     """MarketDataProvider backed by Yahoo Finance via the `yfinance` package."""
+
+    # Provider identity, per the ProviderAdapter contract
+    # (catalystiq/providers/base.py). PROVIDER_NAME is the stable registry
+    # key and what a Bronze run's `provider` field records going forward.
+    PROVIDER_NAME = "yahoo"
+    DOMAIN = DataDomain.MARKET_DATA
 
     # Bumped whenever this adapter's parsing/field-mapping logic changes -
     # persisted on every Bronze ingestion run (catalystiq/pipelines/

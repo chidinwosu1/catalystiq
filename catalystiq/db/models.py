@@ -62,12 +62,45 @@ class BronzeIngestionRun(Base):
     requested_at: Mapped[dt.datetime] = mapped_column(DateTime)
     started_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
-    # partial: reserved for a future multi-call ingestion path - the
-    # current single-provider-call design can only ever land on succeeded
-    # or failed (see market_price_pipeline.py's ingest_bronze() docstring).
+    # Allowed values are the IngestionStatus set (catalystiq/providers/base.py):
+    # running | succeeded | partial | failed | rate_limited | unavailable.
+    # The single-provider-call price pipeline only lands on succeeded/failed
+    # today; the rest exist for the network-backed adapters added later.
     status: Mapped[str] = mapped_column(String(20), default="running", index=True)
     bars_fetched: Mapped[int] = mapped_column(Integer, default=0)
     error_detail: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+
+    # --- Generalized ingestion-run fields (spec §3) -------------------
+    # Added additively so this one table serves every data domain, not just
+    # market_price. All nullable: the existing price-bar path leaves them
+    # unset and keeps writing requested_symbol/bars_fetched above. Network-
+    # backed adapters (Phase 2+) populate these.
+    #
+    # `requested_identifier` is the domain-agnostic form of "what was
+    # requested" (symbol, CIK, FRED/BLS series id, BEA table+line, ...);
+    # `requested_symbol` stays the market-data specialization.
+    requested_identifier: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    dataset: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    endpoint: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    data_classification: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    license_classification: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    # Provider's own response timestamp, and the original data-release
+    # timestamp when the provider exposes one - kept distinct from
+    # requested_at/completed_at (which are our clock), never conflated.
+    response_timestamp: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    release_timestamp: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Domain-agnostic record count (bars_fetched is the price-bar alias).
+    record_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rate_limit_info: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Normalized ProviderErrorCategory value; error_detail holds the
+    # sanitized (secret-free) message.
+    error_category: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    # Integrity + reference for the raw payload. `payload_reference` points
+    # at immutable external storage when the payload is too large to inline.
+    payload_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    payload_reference: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
 
 class BronzeMarketPriceBar(Base):
