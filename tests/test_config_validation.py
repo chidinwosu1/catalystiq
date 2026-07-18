@@ -13,10 +13,18 @@ def test_default_settings_are_valid():
 
 
 def test_enabled_but_unimplemented_source_missing_key_does_not_block():
-    # FRED enabled with no key must NOT fail startup in Phase 1 (no adapter
-    # yet) - this is acceptance criterion 6 (unrelated/optional keys don't
+    # BLS enabled with no key must NOT fail startup (no adapter yet, arrives
+    # in Phase 3) - acceptance criterion 6 (unrelated/optional keys don't
     # break the app).
-    validate_settings(Settings(enable_fred=True, fred_api_key=""))
+    validate_settings(Settings(enable_bls=True, bls_api_key=""))
+
+
+def test_enabled_implemented_source_missing_key_raises():
+    # FRED is implemented now; enabling it without a key must fail fast.
+    with pytest.raises(ConfigurationError) as exc:
+        validate_settings(Settings(enable_fred=True, fred_api_key=""))
+    assert "fred" in str(exc.value)
+    assert "fred_api_key" in str(exc.value)
 
 
 def test_enabled_implemented_source_missing_creds_raises():

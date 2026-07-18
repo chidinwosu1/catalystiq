@@ -97,7 +97,7 @@ SOURCE_REGISTRY: list[SourceDescriptor] = [
         requires_api_key=True,
         license=LicenseClassification.PUBLIC_DOMAIN,
         base_urls=("https://api.stlouisfed.org/fred", "https://api.stlouisfed.org/fred/series/observations"),
-        implemented=False,
+        implemented=True,
         notes="FRED + ALFRED (realtime/vintage params) via the same key.",
     ),
     SourceDescriptor(
@@ -251,6 +251,10 @@ def build_adapter(name: str, settings=None):
         from catalystiq.providers.calendars import get_calendar_provider
 
         return get_calendar_provider()
+    if name == "fred":
+        from catalystiq.providers.macro import get_macro_provider
+
+        return get_macro_provider()
 
     # Unreachable: every implemented source is handled above. Guard anyway so
     # marking a source implemented without wiring it here fails loudly.

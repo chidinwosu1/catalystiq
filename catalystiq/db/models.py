@@ -232,6 +232,72 @@ class SilverMarketSession(Base, SilverRecordMixin):
     calendar_version: Mapped[str] = mapped_column(String(30))
 
 
+class SilverMacroSeries(Base, SilverRecordMixin):
+    """Normalized macro series metadata (§9's macro_series). Idempotent on
+    (provider, series_id)."""
+
+    __tablename__ = "silver_macro_series"
+    __table_args__ = (
+        UniqueConstraint("provider", "series_id", name="uq_silver_macro_series"),
+    )
+
+    series_id: Mapped[str] = mapped_column(String(50), index=True)
+    title: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    frequency: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    units: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    seasonal_adjustment: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    observation_start: Mapped[dt.date | None] = mapped_column(nullable=True)
+    observation_end: Mapped[dt.date | None] = mapped_column(nullable=True)
+
+
+class SilverMacroObservation(Base, SilverRecordMixin):
+    """Normalized macro observation with point-in-time vintage (§7). Unique on
+    (provider, series_id, observation_date, realtime_start) so every vintage
+    of a given observation date coexists - a revised value is a NEW row, the
+    originally-known value is never overwritten. `value` is None for a
+    missing observation, never fabricated."""
+
+    __tablename__ = "silver_macro_observation"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "series_id",
+            "observation_date",
+            "realtime_start",
+            name="uq_silver_macro_observation_vintage",
+        ),
+    )
+
+    series_id: Mapped[str] = mapped_column(String(50), index=True)
+    observation_date: Mapped[dt.date] = mapped_column(index=True)
+    value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    realtime_start: Mapped[dt.date | None] = mapped_column(nullable=True)
+    realtime_end: Mapped[dt.date | None] = mapped_column(nullable=True)
+    units: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    frequency: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    seasonal_adjustment: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+
+class SilverEconomicRelease(Base, SilverRecordMixin):
+    """Normalized economic release (§11's economic_release). Keeps scheduled
+    release date and actual publication timestamp as distinct concepts (§7).
+    Idempotent on (provider, release_id, scheduled_date)."""
+
+    __tablename__ = "silver_economic_release"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider", "release_id", "scheduled_date", name="uq_silver_economic_release"
+        ),
+    )
+
+    release_id: Mapped[str] = mapped_column(String(30), index=True)
+    name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    scheduled_date: Mapped[dt.date | None] = mapped_column(nullable=True)
+    actual_published_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    press_release: Mapped[bool | None] = mapped_column(nullable=True)
+    link: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
 class SilverPriceBar(Base):
     __tablename__ = "silver_price_bar"
     __table_args__ = (UniqueConstraint("ticker_id", "date", name="uq_silver_price_bar_ticker_date"),)

@@ -39,13 +39,18 @@ class Settings(BaseSettings):
     market_data_secondary_provider: str = "twelve_data"
 
     # Per-source enable flags. A source with no API key (Yahoo, NYSE) has no
-    # flag - it's always available; these gate the rest. Defaults follow the
-    # spec's recommended starting posture (Twelve Data + Webull off).
+    # flag - it's always available; these gate the rest.
+    #
+    # Secure-by-default: sources that need a key or required config
+    # (sec_edgar/fred/bls/bea, twelve_data, webull) default OFF, so a fresh
+    # clone boots without credentials. Turn one on deliberately and its
+    # config becomes required - validate_settings() then fails fast if it's
+    # missing. Keyless sources (finra, nasdaq_trader) default ON.
     enable_twelve_data: bool = False
-    enable_sec_edgar: bool = True
-    enable_fred: bool = True
-    enable_bls: bool = True
-    enable_bea: bool = True
+    enable_sec_edgar: bool = False
+    enable_fred: bool = False
+    enable_bls: bool = False
+    enable_bea: bool = False
     enable_finra: bool = True
     enable_nasdaq_trader: bool = True
     enable_webull: bool = False
