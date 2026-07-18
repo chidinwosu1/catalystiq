@@ -1,34 +1,44 @@
 import { Check } from "lucide-react";
+import type { PageId } from "../../types/nav";
 
 /**
  * The Next Steps workflow: shows where the user is in the investing process
- * (a user action, never a buy/sell recommendation). Steps before the active
- * one read as complete; steps after preview what's ahead.
+ * (a user action, never a buy/sell recommendation). Each step links to the
+ * page for that stage. Steps before the active one read as complete; steps
+ * after preview what's ahead.
  */
-const WORKFLOW_STEPS = [
-  "Define preferences",
-  "Scan the market",
-  "Review opportunities",
-  "Build strategy",
-  "Confirm trade",
-  "Monitor",
-] as const;
+const WORKFLOW_STEPS: { label: string; page: PageId }[] = [
+  { label: "Define preferences", page: "home" },
+  { label: "Scan the market", page: "markets" },
+  { label: "Review opportunities", page: "trade" },
+  { label: "Build strategy", page: "analysis" },
+  { label: "Confirm trade", page: "ticket" },
+  { label: "Monitor", page: "portfolio" },
+];
 
-export default function WorkflowBar({ current }: { current: number }) {
+export default function WorkflowBar({
+  current,
+  onNavigate,
+}: {
+  current: number;
+  onNavigate: (page: PageId) => void;
+}) {
   return (
     <div className="cq-glass mb-6 flex items-center gap-2 overflow-x-auto rounded-2xl p-3">
-      {WORKFLOW_STEPS.map((label, i) => {
+      {WORKFLOW_STEPS.map((step, i) => {
         const done = i < current;
         const active = i === current;
         return (
-          <div key={label} className="flex flex-shrink-0 items-center gap-2">
-            <div
-              className={`flex flex-shrink-0 items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] ${
+          <div key={step.label} className="flex flex-shrink-0 items-center gap-2">
+            <button
+              onClick={() => onNavigate(step.page)}
+              aria-current={active ? "step" : undefined}
+              className={`flex flex-shrink-0 items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] transition-colors ${
                 active
                   ? "border border-brand-blue/40 bg-brand-blue/15 text-ink-primary"
                   : done
-                    ? "text-ink-secondary"
-                    : "text-ink-muted"
+                    ? "text-ink-secondary hover:bg-surface-2 hover:text-ink-primary"
+                    : "text-ink-muted hover:bg-surface-2 hover:text-ink-secondary"
               }`}
             >
               <span
@@ -42,8 +52,8 @@ export default function WorkflowBar({ current }: { current: number }) {
               >
                 {done ? <Check size={12} /> : i + 1}
               </span>
-              <span className="whitespace-nowrap">{label}</span>
-            </div>
+              <span className="whitespace-nowrap">{step.label}</span>
+            </button>
             {i < WORKFLOW_STEPS.length - 1 && (
               <span className="flex-shrink-0 text-ink-muted">›</span>
             )}

@@ -7,7 +7,6 @@ import {
   Briefcase,
   CalendarDays,
   CheckCircle2,
-  Clock,
   Cpu,
   Eye,
   Globe,
@@ -164,37 +163,37 @@ function Kicker({ children }: { children: ReactNode }) {
 function FlipTile({ offer, onLearnMore }: { offer: Offer; onLearnMore: (p: PageId) => void }) {
   const [flipped, setFlipped] = useState(false);
   const Icon = offer.icon;
-  const faceBase = "cq-face cq-glass flex flex-col rounded-[18px] p-6";
+  const faceBase = "cq-face cq-glass flex flex-col rounded-2xl px-[17px] py-4";
   return (
     <div
-      className={`cq-flip cq-reveal min-h-[210px] cursor-pointer ${flipped ? "is-flipped" : ""}`}
+      className={`cq-flip cq-reveal min-h-[158px] cursor-pointer ${flipped ? "is-flipped" : ""}`}
       onClick={() => setFlipped((v) => !v)}
     >
       <div className="cq-flip-inner">
         {/* Front */}
         <div className={faceBase}>
-          <div className="mb-4 grid h-11 w-11 place-items-center rounded-xl border border-brand-blue/40 bg-brand-blue/15 text-[#5ea8ff]">
-            <Icon size={22} />
+          <div className="mb-2.5 grid h-9 w-9 place-items-center rounded-[10px] border border-brand-blue/40 bg-brand-blue/15 text-[#5ea8ff]">
+            <Icon size={19} />
           </div>
-          <h3 className="mb-1.5 text-lg font-semibold tracking-tight text-ink-primary">
+          <h3 className="mb-1 text-[15.5px] font-semibold tracking-tight text-ink-primary">
             {offer.title}
           </h3>
-          <p className="text-[14.5px] font-medium text-ink-primary">{offer.lead}</p>
-          <span className="mt-auto pt-3.5 text-xs text-ink-muted">Flip for more →</span>
+          <p className="text-[13px] font-medium text-ink-primary">{offer.lead}</p>
+          <span className="mt-auto pt-2.5 text-[11.5px] text-ink-muted">Flip for more →</span>
         </div>
         {/* Back */}
         <div className={`${faceBase} cq-face-back`}>
-          <h3 className="mb-2 text-[15px] font-semibold text-[#5ea8ff]">{offer.title}</h3>
-          <p className="text-[13.5px] leading-relaxed text-ink-secondary">{offer.detail}</p>
+          <h3 className="mb-1.5 text-[13.5px] font-semibold text-[#5ea8ff]">{offer.title}</h3>
+          <p className="text-[12.5px] leading-normal text-ink-secondary">{offer.detail}</p>
           <button
             onClick={(e) => {
               e.stopPropagation();
               onLearnMore(offer.page);
             }}
-            className="group mt-auto inline-flex items-center gap-1.5 pt-3.5 text-[13px] font-semibold text-ink-primary"
+            className="group mt-auto inline-flex items-center gap-1.5 pt-2.5 text-[12.5px] font-semibold text-ink-primary"
           >
             Learn more
-            <ArrowRight size={15} className="transition-transform group-hover:translate-x-1" />
+            <ArrowRight size={14} className="transition-transform group-hover:translate-x-1" />
           </button>
         </div>
       </div>
@@ -270,22 +269,13 @@ export default function HomePage({ onNavigate }: HomePageProps) {
             combined into one investment-intelligence platform, so every opportunity is backed by
             evidence, not a single opinion.
           </p>
-          <div className="mt-7 flex flex-wrap justify-center gap-3">
+          <div className="mt-7 flex justify-center">
             <button
               onClick={() => onNavigate("analysis")}
-              className="inline-flex items-center gap-2.5 rounded-xl bg-brand-blue px-5.5 py-3 text-[15px] font-semibold text-white shadow-[0_10px_30px_rgba(57,135,229,0.32)] transition-transform hover:-translate-y-0.5"
-              style={{ paddingLeft: "1.375rem", paddingRight: "1.375rem" }}
+              className="inline-flex items-center gap-2.5 rounded-xl bg-brand-blue px-6 py-3 text-[15px] font-semibold text-white shadow-[0_10px_30px_rgba(57,135,229,0.32)] transition-transform hover:-translate-y-0.5"
             >
               <TrendingUp size={17} />
               Start Your Analysis
-            </button>
-            <button
-              onClick={() => onNavigate("analysis")}
-              className="inline-flex items-center gap-2.5 rounded-xl border border-border-strong bg-surface/60 px-5.5 py-3 text-[15px] font-semibold text-ink-primary transition-all hover:-translate-y-0.5 hover:bg-surface-2"
-              style={{ paddingLeft: "1.375rem", paddingRight: "1.375rem" }}
-            >
-              <Clock size={17} />
-              Discover Market Opportunities
             </button>
           </div>
         </div>

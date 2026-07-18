@@ -111,7 +111,11 @@ function OpportunityCard({
   );
 }
 
-export default function TradeCenterPage({ onTrade, onViewAnalysis }: TradeCenterPageProps) {
+export default function TradeCenterPage({
+  onTrade,
+  onViewAnalysis,
+  onNavigate,
+}: TradeCenterPageProps) {
   const [sortKey, setSortKey] = useState<SortKey>("catalyst");
   const [filter, setFilter] = useState<RiskFilter>("all");
   const [showAll, setShowAll] = useState(false);
@@ -146,7 +150,7 @@ export default function TradeCenterPage({ onTrade, onViewAnalysis }: TradeCenter
 
   return (
     <div>
-      <WorkflowBar current={2} />
+      <WorkflowBar current={2} onNavigate={onNavigate} />
 
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
