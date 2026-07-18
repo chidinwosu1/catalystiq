@@ -11,6 +11,7 @@ import {
 import {
   ApiError,
   cancelScheduledOrder,
+  confirmOrder,
   getAccount,
   getFundamentals,
   getPositions,
@@ -21,6 +22,7 @@ import {
   type AccountInfo,
   type FundamentalsSnapshot,
   type NewOrder,
+  type OrderConfirmation,
   type OrderType,
   type Position,
   type Quote,
@@ -83,6 +85,7 @@ function formatCountdown(msRemaining: number): string {
 
 const STATUS_CLASS: Record<string, string> = {
   pending: "text-brand-blue",
+  due: "text-status-warning",
   submitted: "text-status-good",
   failed: "text-status-critical",
   cancelled: "text-ink-muted",
@@ -128,7 +131,16 @@ export default function TradeTicketPage({
   const [scheduledOrders, setScheduledOrders] = useState<ScheduledOrderRecord[]>([]);
   const [nowTick, setNowTick] = useState(() => Date.now());
 
-  const [reviewing, setReviewing] = useState(false);
+  // The account the order is confirmed against (bound into the confirmation
+  // token, §13). Single paper account for now.
+  const [accountId, setAccountId] = useState("paper");
+
+  const [reviewing, setReviewing] = useState(false); // scheduled (client-side) review
+  const [reviewLoading, setReviewLoading] = useState(false); // fetching a server confirmation
+  // Server-issued confirmation for an immediate order: the reviewed details +
+  // a single-use, short-lived token bound to the exact order below.
+  const [confirmation, setConfirmation] = useState<OrderConfirmation | null>(null);
+  const [confirmedOrder, setConfirmedOrder] = useState<NewOrder | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<ApiError | null>(null);
   const [submitResult, setSubmitResult] = useState<Record<string, unknown> | null>(null);
@@ -166,6 +178,27 @@ export default function TradeTicketPage({
     const interval = setInterval(() => setNowTick(Date.now()), 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Any change to the order details invalidates a held confirmation - the
+  // token is bound to the exact order (§13), so the user must re-review.
+  useEffect(() => {
+    setConfirmation(null);
+    setConfirmedOrder(null);
+  }, [
+    symbol,
+    side,
+    qty,
+    orderType,
+    timeInForce,
+    limitPrice,
+    stopPrice,
+    trailPercent,
+    takeProfitPct,
+    stopLossPct,
+    extendedHours,
+    accountId,
+    executionMode,
+  ]);
 
   useEffect(() => {
     if (!symbol) {
@@ -263,25 +296,83 @@ export default function TradeTicketPage({
     return order;
   }
 
-  async function handleSubmit() {
+  // "Review Order": for a scheduled order this is a client-side review (no
+  // submission happens); for an immediate order it fetches a server
+  // confirmation (§13) with the exact reviewed details + a single-use token.
+  async function handleReview() {
+    setSubmitError(null);
+    if (executionMode === "scheduled") {
+      setReviewing(true);
+      return;
+    }
+    setReviewLoading(true);
+    try {
+      const order = buildOrder();
+      const conf = await confirmOrder(order, accountId);
+      setConfirmation(conf);
+      setConfirmedOrder(order);
+    } catch (error) {
+      setSubmitError(error instanceof ApiError ? error : new ApiError(0, "Unexpected error."));
+    } finally {
+      setReviewLoading(false);
+    }
+  }
+
+  // Submit the exact order that was confirmed, with its single-use token.
+  async function handleSubmitNow() {
+    if (!confirmation || !confirmedOrder) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
-      if (executionMode === "scheduled") {
-        const when = new Date(scheduledAt);
-        const record = await scheduleOrder(buildOrder(), when);
-        setScheduledResult(record);
-        refreshScheduledOrders();
-      } else {
-        const result = await submitOrder(buildOrder());
-        setSubmitResult(result);
-      }
+      const result = await submitOrder(confirmedOrder, accountId, confirmation.confirmation_token);
+      setSubmitResult(result);
+      setConfirmation(null);
+      setConfirmedOrder(null);
+    } catch (error) {
+      // A 403 here means the token expired, was already used, or the order
+      // changed - drop the confirmation so the user must re-review.
+      setConfirmation(null);
+      setConfirmedOrder(null);
+      setSubmitError(error instanceof ApiError ? error : new ApiError(0, "Unexpected error."));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleScheduleSubmit() {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const when = new Date(scheduledAt);
+      const record = await scheduleOrder(buildOrder(), when);
+      setScheduledResult(record);
+      refreshScheduledOrders();
       setReviewing(false);
     } catch (error) {
       setSubmitError(error instanceof ApiError ? error : new ApiError(0, "Unexpected error."));
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function loadOrderIntoTicket(record: ScheduledOrderRecord) {
+    const o = record.order;
+    setSymbolInput(record.symbol);
+    setSymbol(record.symbol.toUpperCase());
+    setSide(o.side);
+    setOrderType(o.type);
+    if (o.time_in_force) setTimeInForce(o.time_in_force);
+    if (o.qty != null) setQty(String(o.qty));
+    setLimitPrice(o.limit_price != null ? String(o.limit_price) : "");
+    setStopPrice(o.stop_price != null ? String(o.stop_price) : "");
+    if (o.trail_percent != null) setTrailPercent(String(o.trail_percent));
+    setExecutionMode("now");
+    setConfirmation(null);
+    setConfirmedOrder(null);
+    setSubmitResult(null);
+    setScheduledResult(null);
+    setReviewing(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function handleCancelScheduled(id: number) {
@@ -311,15 +402,25 @@ export default function TradeTicketPage({
       ? ((quote.price - quote.previous_close) / quote.previous_close) * 100
       : null;
 
-  const pendingScheduled = scheduledOrders.filter((s) => s.status === "pending");
+  // Pending (still counting down) and due (time passed, awaiting manual
+  // review - the backend never auto-submits, §13).
+  const openScheduled = scheduledOrders.filter(
+    (s) => s.status === "pending" || s.status === "due"
+  );
+
+  const tokenMsRemaining = confirmation
+    ? new Date(confirmation.expires_at).getTime() - nowTick
+    : 0;
+  const tokenExpired = confirmation !== null && tokenMsRemaining <= 0;
+  const isSubmissionDisabled = submitError?.status === 403;
 
   return (
     <div className="mx-auto max-w-2xl space-y-5">
       <div>
         <h1 className="text-xl font-semibold text-ink-primary">Trade Ticket</h1>
         <p className="mt-1 text-sm text-ink-secondary">
-          Submits a real paper order through the connected broker - not a simulation of a
-          simulation.
+          Review each order's exact details - including estimated max loss - then confirm to submit
+          a real paper order. Submission is disabled until explicitly enabled server-side.
         </p>
       </div>
 
@@ -464,6 +565,17 @@ export default function TradeTicketPage({
             />
           </div>
         </div>
+
+        <label className="mt-3 block text-xs text-ink-muted">
+          Account
+          <input
+            type="text"
+            value={accountId}
+            onChange={(e) => setAccountId(e.target.value)}
+            placeholder="paper"
+            className="mt-1 w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-ink-primary focus:border-brand-blue/50 focus:outline-none"
+          />
+        </label>
 
         <div className="mt-4 space-y-1.5 rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-sm">
           <div className="flex justify-between">
@@ -675,52 +787,84 @@ export default function TradeTicketPage({
         )}
       </SectionCard>
 
-      {!reviewing && !submitResult && !scheduledResult && (
-        <div className="flex gap-3">
-          <button
-            disabled={!canReview}
-            onClick={() => setReviewing(true)}
-            className="flex-1 rounded-lg bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white transition-opacity disabled:opacity-40"
-          >
-            Review Order
-          </button>
-          {symbol && (
-            <button
-              onClick={() => onViewAnalysis(symbol)}
-              className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-ink-secondary hover:text-ink-primary"
+      {!confirmation && !reviewing && !submitResult && !scheduledResult && (
+        <div className="space-y-3">
+          {submitError && (
+            <div
+              className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs ${
+                isSubmissionDisabled
+                  ? "border-status-warning/40 bg-status-warning-soft text-status-warning"
+                  : "border-status-critical/40 bg-status-critical-soft text-status-critical"
+              }`}
             >
-              View Analysis
-            </button>
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+              <span>{submitError.message}</span>
+            </div>
           )}
+          <div className="flex gap-3">
+            <button
+              disabled={!canReview || reviewLoading}
+              onClick={handleReview}
+              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white transition-opacity disabled:opacity-40"
+            >
+              {reviewLoading && <Loader2 size={14} className="animate-spin" />}
+              Review Order
+            </button>
+            {symbol && (
+              <button
+                onClick={() => onViewAnalysis(symbol)}
+                className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-ink-secondary hover:text-ink-primary"
+              >
+                View Analysis
+              </button>
+            )}
+          </div>
         </div>
       )}
 
-      {reviewing && (
-        <SectionCard title="Order Summary">
-          <p className="text-sm text-ink-primary">
-            {side === "buy" ? "Buy" : "Sell"} {qtyNum} shares of {symbol}
+      {/* Immediate order: server-issued confirmation with reviewed details +
+          a single-use, short-lived token (§13). */}
+      {confirmation && (
+        <SectionCard title="Confirm Order">
+          <p className="text-sm font-medium text-ink-primary">
+            {confirmation.review.side === "buy" ? "Buy" : "Sell"} {confirmation.review.qty ?? ""}
+            {confirmation.review.notional != null
+              ? ` ${money(confirmation.review.notional)} of`
+              : " shares of"}{" "}
+            {confirmation.review.symbol}
           </p>
-          <p className="mt-1 text-sm text-ink-secondary">
-            {ORDER_TYPES.find((t) => t.id === orderType)?.label} order ·{" "}
-            {TIF_OPTIONS.find((t) => t.id === timeInForce)?.label} · {tradingStyle} trading (
-            {timePeriod})
-          </p>
-          <p className="mt-1 text-sm text-ink-secondary">
-            Estimated value: {money(estimatedValue)}
-          </p>
-          {takeProfitPrice && (
-            <p className="mt-1 text-sm text-status-good">
-              Take profit: {money(takeProfitPrice)}
-            </p>
-          )}
-          {stopLossPrice && (
-            <p className="mt-1 text-sm text-status-critical">Stop loss: {money(stopLossPrice)}</p>
-          )}
-          <p className="mt-1 flex items-center gap-1.5 text-sm text-ink-secondary">
-            <Clock size={13} />
-            {executionMode === "now"
-              ? "Executes immediately on submit"
-              : scheduledDate && `Scheduled for ${scheduledDate.toLocaleString()}`}
+          <div className="mt-2 space-y-1 rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-sm">
+            <Row label="Order type" value={ORDER_TYPES.find((t) => t.id === confirmation.review.type)?.label ?? confirmation.review.type} />
+            <Row label="Time in force" value={TIF_OPTIONS.find((t) => t.id === confirmation.review.time_in_force)?.label ?? confirmation.review.time_in_force} />
+            {confirmation.review.limit_price != null && (
+              <Row label="Limit price" value={money(confirmation.review.limit_price)} />
+            )}
+            {confirmation.review.stop_price != null && (
+              <Row label="Stop price" value={money(confirmation.review.stop_price)} />
+            )}
+            <Row label="Estimated value" value={money(estimatedValue)} />
+            <Row
+              label="Estimated max loss"
+              value={
+                confirmation.review.estimated_max_loss != null
+                  ? money(confirmation.review.estimated_max_loss)
+                  : "Not estimable (no stop / market order)"
+              }
+              emphasize={confirmation.review.estimated_max_loss != null}
+            />
+            <Row label="Account" value={confirmation.review.account_id} />
+            <Row label="Mode" value={confirmation.review.mode} />
+          </div>
+
+          <p
+            className={`mt-2 flex items-center gap-1.5 text-xs ${
+              tokenExpired ? "text-status-critical" : "text-ink-muted"
+            }`}
+          >
+            <Clock size={12} />
+            {tokenExpired
+              ? "Confirmation expired - review again to get a fresh token."
+              : `Confirmation valid ${formatCountdown(tokenMsRemaining)} · single-use`}
           </p>
 
           {submitError && (
@@ -732,12 +876,65 @@ export default function TradeTicketPage({
 
           <div className="mt-4 flex gap-3">
             <button
-              disabled={submitting}
-              onClick={handleSubmit}
+              disabled={submitting || tokenExpired}
+              onClick={handleSubmitNow}
               className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
             >
               {submitting && <Loader2 size={14} className="animate-spin" />}
-              {executionMode === "now" ? "Submit Paper Trade" : "Schedule Paper Trade"}
+              Confirm & Submit
+            </button>
+            <button
+              onClick={() => {
+                setConfirmation(null);
+                setConfirmedOrder(null);
+              }}
+              className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-ink-secondary hover:text-ink-primary"
+            >
+              Back
+            </button>
+          </div>
+        </SectionCard>
+      )}
+
+      {/* Scheduled order: client-side review, then queue a draft (never
+          auto-submitted). */}
+      {reviewing && (
+        <SectionCard title="Review Scheduled Order">
+          <p className="text-sm text-ink-primary">
+            {side === "buy" ? "Buy" : "Sell"} {qtyNum} shares of {symbol}
+          </p>
+          <p className="mt-1 text-sm text-ink-secondary">
+            {ORDER_TYPES.find((t) => t.id === orderType)?.label} order ·{" "}
+            {TIF_OPTIONS.find((t) => t.id === timeInForce)?.label} · account {accountId}
+          </p>
+          <p className="mt-1 text-sm text-ink-secondary">Estimated value: {money(estimatedValue)}</p>
+          <p className="mt-1 flex items-center gap-1.5 text-sm text-ink-secondary">
+            <Clock size={13} />
+            {scheduledDate && `Becomes due for review at ${scheduledDate.toLocaleString()}`}
+          </p>
+          <div className="mt-2 flex items-start gap-2 rounded-lg border border-status-warning/30 bg-status-warning-soft px-3 py-2 text-xs text-status-warning">
+            <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+            <span>
+              Scheduling queues a draft - it is <strong>not</strong> submitted automatically. When
+              due, review and confirm it here to submit.
+            </span>
+          </div>
+
+          {submitError && (
+            <div className="mt-3 flex items-start gap-2 rounded-lg border border-status-critical/40 bg-status-critical-soft px-3 py-2 text-xs text-status-critical">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+              <span>{submitError.message}</span>
+            </div>
+          )}
+
+          <div className="mt-4 flex gap-3">
+            <button
+              disabled={submitting}
+              onClick={handleScheduleSubmit}
+              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
+            >
+              {submitting && <Loader2 size={14} className="animate-spin" />}
+              Queue Scheduled Draft
             </button>
             <button
               onClick={() => setReviewing(false)}
@@ -768,13 +965,14 @@ export default function TradeTicketPage({
       )}
 
       {scheduledResult && (
-        <SectionCard title="Order Scheduled">
+        <SectionCard title="Scheduled Draft Queued">
           <div className="flex items-start gap-2 text-sm text-brand-blue">
             <Clock size={15} className="mt-0.5 shrink-0" />
             <span>
-              Queued - the backend will submit it automatically at{" "}
-              {new Date(scheduledResult.scheduled_at).toLocaleString()}. See the pending list
-              below.
+              Queued for{" "}
+              {new Date(scheduledResult.scheduled_at).toLocaleString()}. It will become
+              <strong> due for manual review</strong> then - it is not submitted automatically.
+              You'll confirm it here to submit.
             </span>
           </div>
           <button
@@ -786,11 +984,15 @@ export default function TradeTicketPage({
         </SectionCard>
       )}
 
-      {pendingScheduled.length > 0 && (
-        <SectionCard title="Pending Scheduled Orders">
+      {openScheduled.length > 0 && (
+        <SectionCard
+          title="Scheduled Orders"
+          description="Queued drafts. Due orders are ready for manual review - none submit automatically."
+        >
           <div className="space-y-2">
-            {pendingScheduled.map((s) => {
+            {openScheduled.map((s) => {
               const target = new Date(s.scheduled_at).getTime();
+              const isDue = s.status === "due";
               return (
                 <div
                   key={s.id}
@@ -802,16 +1004,28 @@ export default function TradeTicketPage({
                     </p>
                     <p className={`mt-0.5 flex items-center gap-1 text-xs ${STATUS_CLASS[s.status]}`}>
                       <Clock size={12} />
-                      {formatCountdown(target - nowTick)} ({new Date(s.scheduled_at).toLocaleString()})
+                      {isDue
+                        ? `Due for review (${new Date(s.scheduled_at).toLocaleString()})`
+                        : `${formatCountdown(target - nowTick)} (${new Date(s.scheduled_at).toLocaleString()})`}
                     </p>
                   </div>
-                  <button
-                    onClick={() => handleCancelScheduled(s.id)}
-                    aria-label="Cancel scheduled order"
-                    className="rounded-md p-1.5 text-ink-muted hover:bg-surface-2 hover:text-status-critical"
-                  >
-                    <X size={15} />
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    {isDue && (
+                      <button
+                        onClick={() => loadOrderIntoTicket(s)}
+                        className="rounded-md border border-brand-blue/40 px-2.5 py-1 text-xs font-medium text-brand-blue hover:bg-brand-blue/10"
+                      >
+                        Review & submit
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleCancelScheduled(s.id)}
+                      aria-label="Cancel scheduled order"
+                      className="rounded-md p-1.5 text-ink-muted hover:bg-surface-2 hover:text-status-critical"
+                    >
+                      <X size={15} />
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -827,6 +1041,27 @@ export default function TradeTicketPage({
         onClick={() => onNavigate("portfolio")}
         secondary={{ label: "Scan the market", onClick: () => onNavigate("markets") }}
       />
+    </div>
+  );
+}
+
+function Row({
+  label,
+  value,
+  emphasize,
+}: {
+  label: string;
+  value: string;
+  emphasize?: boolean;
+}) {
+  return (
+    <div className="flex justify-between gap-3">
+      <span className="text-ink-secondary">{label}</span>
+      <span
+        className={`text-right ${emphasize ? "font-semibold text-status-critical" : "text-ink-primary"}`}
+      >
+        {value}
+      </span>
     </div>
   );
 }

@@ -118,7 +118,9 @@ export interface NewOrder {
   stop_loss_price?: number;
 }
 
-export type ScheduledOrderStatus = "pending" | "submitted" | "failed" | "cancelled";
+// "due" = the scheduled time has passed and the order is ready for manual
+// review/confirmation; it is NEVER submitted automatically (§13).
+export type ScheduledOrderStatus = "pending" | "due" | "submitted" | "failed" | "cancelled";
 
 export interface ScheduledOrderRecord {
   id: number;
@@ -129,6 +131,37 @@ export interface ScheduledOrderRecord {
   broker_order_id: string | null;
   error_detail: string | null;
   created_at: string;
+}
+
+// --- Order confirmation (§13): two-step submit -------------------------
+// Step 1 (confirm) returns the exact details to review plus a single-use,
+// short-lived token bound to them. Step 2 (submit) requires that token; any
+// change to the order invalidates it.
+
+export interface OrderReview {
+  symbol: string;
+  side: OrderSide;
+  type: OrderType;
+  time_in_force: TimeInForce;
+  qty: number | null;
+  notional: number | null;
+  limit_price: number | null;
+  stop_price: number | null;
+  estimated_max_loss: number | null;
+  account_id: string;
+  mode: string;
+}
+
+export interface OrderConfirmation {
+  review: OrderReview;
+  confirmation_token: string;
+  expires_at: string;
+}
+
+export interface BrokerConnectionTest {
+  provider: string;
+  ok: boolean;
+  detail: string;
 }
 
 export type IndicatorStatus = "computed" | "insufficient_data";
@@ -225,12 +258,39 @@ export function getOrders(): Promise<Record<string, unknown>[]> {
   return request("/paper/orders");
 }
 
-export function submitOrder(order: NewOrder): Promise<Record<string, unknown>> {
+/**
+ * Step 1 of order submission (§13): review the exact order details and
+ * receive a single-use, short-lived confirmation token bound to them.
+ * A 403 here means paper submission is disabled (or live is unavailable).
+ */
+export function confirmOrder(order: NewOrder, accountId: string): Promise<OrderConfirmation> {
+  return request("/paper/orders/confirm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ order, account_id: accountId, confirmation_token: "" }),
+  });
+}
+
+/**
+ * Step 2 of order submission (§13): submit with the confirmation token from
+ * confirmOrder(). The token is single-use and bound to these exact details -
+ * any change (or expiry, or reuse) is rejected with a 403.
+ */
+export function submitOrder(
+  order: NewOrder,
+  accountId: string,
+  confirmationToken: string
+): Promise<Record<string, unknown>> {
   return request("/paper/orders", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(order),
+    body: JSON.stringify({ order, account_id: accountId, confirmation_token: confirmationToken }),
   });
+}
+
+/** Read-only Webull reachability check (never places/cancels an order). */
+export function getBrokerConnectionTest(): Promise<BrokerConnectionTest> {
+  return request("/paper/connection-test");
 }
 
 export function cancelOrder(orderId: string): Promise<Record<string, unknown>> {
