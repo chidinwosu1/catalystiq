@@ -8,6 +8,7 @@ import OpportunityPanel from "../components/trade/OpportunityPanel";
 import MarketOverviewPanel from "../components/trade/MarketOverviewPanel";
 import { opportunities, type OpportunityDetail } from "../mockTradeCenter";
 import { riskRole, roleClasses } from "../lib/theme";
+import { useQuotes } from "../lib/useQuotes";
 import type { RiskLevel } from "../mockDashboardData";
 import type { PageId } from "../types/nav";
 
@@ -34,10 +35,12 @@ const FILTERS: { key: RiskFilter; label: string }[] = [
 
 function OpportunityCard({
   opp,
+  livePrice,
   onReview,
   onTrade,
 }: {
   opp: OpportunityDetail;
+  livePrice: number | null;
   onReview: () => void;
   onTrade: () => void;
 }) {
@@ -51,6 +54,16 @@ function OpportunityCard({
         <div>
           <div className="text-[18px] font-bold tracking-tight text-ink-primary">{opp.symbol}</div>
           <div className="mt-px text-[11.5px] text-ink-muted">{opp.companyName}</div>
+          <div className="mt-1 font-mono text-[12.5px] text-ink-secondary">
+            {livePrice != null ? (
+              <>
+                {livePrice.toLocaleString("en-US", { style: "currency", currency: "USD" })}{" "}
+                <span className="text-[#5ea8ff]">live</span>
+              </>
+            ) : (
+              <span className="text-ink-muted">{opp.price}</span>
+            )}
+          </div>
         </div>
         <div className="flex flex-col items-end gap-2">
           <RatingBadge rating={opp.rating} />
@@ -123,6 +136,9 @@ export default function TradeCenterPage({
   const [expanded, setExpanded] = useState(false);
   const [marketOpen, setMarketOpen] = useState(false);
   const [marketExpanded, setMarketExpanded] = useState(false);
+
+  // Live quotes for every opportunity; falls back to the demo price per card.
+  const { prices } = useQuotes(useMemo(() => opportunities.map((o) => o.symbol), []));
 
   const sorted = useMemo(() => {
     const list = opportunities.filter((o) => filter === "all" || o.risk === filter);
@@ -226,6 +242,7 @@ export default function TradeCenterPage({
           <OpportunityCard
             key={opp.symbol}
             opp={opp}
+            livePrice={prices[opp.symbol] ?? null}
             onReview={() => openReview(opp)}
             onTrade={() => onTrade(opp.symbol)}
           />
@@ -239,6 +256,7 @@ export default function TradeCenterPage({
 
       <OpportunityPanel
         opp={selected !== null ? opportunities[selected] : null}
+        livePrice={selected !== null ? prices[opportunities[selected].symbol] ?? null : null}
         expanded={expanded}
         onClose={closeReview}
         onToggleExpand={() => setExpanded((v) => !v)}

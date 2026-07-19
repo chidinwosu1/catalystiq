@@ -4,21 +4,14 @@ import RatingBadge from "./RatingBadge";
 import InfoTooltip from "./InfoTooltip";
 import DemoBadge from "./DemoBadge";
 import { riskRole, roleClasses } from "../lib/theme";
+import { usePreferences, STYLE_LABEL, RISK_LABEL, HOLD_BY_STYLE } from "../lib/preferences";
 import type { OpportunityDetail } from "../mockTradeCenter";
 
 /**
  * The personalized Investment Strategy view: turns an opportunity into a plan
- * framed for the user's own preferences, with an info tooltip on every scored
- * section. Demo profile until the Preferences store is wired through.
+ * framed for the user's own preferences (from the shared Preferences store),
+ * with an info tooltip on every scored section.
  */
-const PROFILE = {
-  style: "Swing",
-  risk: "Moderate",
-  capital: 10000,
-  maxLossPct: 5,
-  hold: "2-10 days",
-};
-
 function parsePrice(s: string): number | null {
   const n = parseFloat(s.replace(/[$,]/g, ""));
   return Number.isFinite(n) ? n : null;
@@ -90,6 +83,14 @@ export default function StrategyOverview({
   livePrice: number | null;
   onTrade: (symbol: string) => void;
 }) {
+  const { prefs } = usePreferences();
+  const PROFILE = {
+    style: STYLE_LABEL[prefs.style],
+    risk: RISK_LABEL[prefs.risk],
+    capital: prefs.amount,
+    maxLossPct: prefs.maxLossPct,
+    hold: HOLD_BY_STYLE[prefs.style],
+  };
   const risk = roleClasses[riskRole(detail.risk)];
   const price = livePrice ?? parsePrice(detail.price);
 
@@ -177,6 +178,25 @@ export default function StrategyOverview({
             downside stays within the limit you set.
           </p>
         </div>
+      </div>
+
+      {/* Next step · Confirm trade (kept near the top so the hand-off is always in reach) */}
+      <div className="flex flex-col items-center gap-3 rounded-2xl border border-brand-blue/25 bg-gradient-to-r from-brand-blue/10 to-transparent p-4 sm:flex-row sm:justify-between">
+        <div>
+          <p className="text-[13px] font-semibold uppercase tracking-wide text-[#5ea8ff]">
+            Next step · Confirm trade
+          </p>
+          <p className="mt-0.5 text-[14px] text-ink-secondary">
+            Happy with the plan? Take it to the ticket and set your risk controls.
+          </p>
+        </div>
+        <button
+          onClick={() => onTrade(detail.symbol)}
+          className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-brand-blue px-5 py-2.5 text-[13px] font-semibold text-white transition-transform hover:-translate-y-0.5"
+        >
+          Confirm Trade · {detail.symbol}
+          <Send size={15} />
+        </button>
       </div>
 
       {/* Sections */}
@@ -373,25 +393,6 @@ export default function StrategyOverview({
             ]}
           />
         </Section>
-      </div>
-
-      {/* CTA */}
-      <div className="flex flex-col items-center gap-3 rounded-2xl border border-brand-blue/25 bg-gradient-to-r from-brand-blue/10 to-transparent p-4 sm:flex-row sm:justify-between">
-        <div>
-          <p className="text-[13px] font-semibold uppercase tracking-wide text-[#5ea8ff]">
-            Next step · Confirm trade
-          </p>
-          <p className="mt-0.5 text-[14px] text-ink-secondary">
-            Happy with the plan? Take it to the ticket and set your risk controls.
-          </p>
-        </div>
-        <button
-          onClick={() => onTrade(detail.symbol)}
-          className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-brand-blue px-5 py-2.5 text-[13px] font-semibold text-white transition-transform hover:-translate-y-0.5"
-        >
-          Confirm Trade · {detail.symbol}
-          <Send size={15} />
-        </button>
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Loader2, Plus, Search, Send } from "lucide-react";
+import { AlertTriangle, Loader2, Plus, Search } from "lucide-react";
 import {
   ApiError,
   getQuote,
@@ -10,7 +10,6 @@ import {
 } from "../lib/api";
 import SectionCard from "../components/SectionCard";
 import StatTile from "../components/StatTile";
-import NextAction from "../components/NextAction";
 import StrategyOverview from "../components/StrategyOverview";
 import { getDemoAnalysis } from "../mockAnalysisDetail";
 import BehavioralAnalysisTable from "../components/BehavioralAnalysisTable";
@@ -610,15 +609,6 @@ export default function AnalysisJournalPage({
           </>
         )}
       </SectionCard>
-
-      <NextAction
-        step="Next step · Place the trade"
-        prompt={`Thesis confirmed for ${symbol}? Take the setup to the trade ticket and set your risk controls.`}
-        label={`Trade ${symbol}`}
-        icon={<Send size={15} />}
-        onClick={() => onTrade(symbol)}
-        secondary={{ label: "Back to market scan", onClick: () => onNavigate("markets") }}
-      />
     </div>
   );
 }

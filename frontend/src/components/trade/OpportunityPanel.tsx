@@ -20,6 +20,7 @@ import type { OpportunityDetail } from "../../mockTradeCenter";
 
 interface OpportunityPanelProps {
   opp: OpportunityDetail | null;
+  livePrice?: number | null;
   expanded: boolean;
   onClose: () => void;
   onToggleExpand: () => void;
@@ -65,6 +66,7 @@ function EvidenceList({ items }: { items: string[] }) {
 
 export default function OpportunityPanel({
   opp,
+  livePrice,
   expanded,
   onClose,
   onToggleExpand,
@@ -112,7 +114,9 @@ export default function OpportunityPanel({
                 </div>
                 <div className="mt-0.5 text-[12.5px] text-ink-muted">{opp.companyName}</div>
                 <div className="mt-1.5 font-mono text-[13px] text-ink-secondary">
-                  {opp.price} · live
+                  {livePrice != null
+                    ? `${livePrice.toLocaleString("en-US", { style: "currency", currency: "USD" })} · live`
+                    : opp.price}
                 </div>
               </div>
               <div className="ml-auto flex gap-1.5">
