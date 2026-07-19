@@ -87,9 +87,9 @@ def test_ingest_and_build_silver_shared_model(test_db_session):
     assert may.validation_status == "clean"
 
 
-def test_bls_and_fred_coexist_same_series_id(test_db_session):
-    # Same series id under different providers must not collide (provider is
-    # part of the Silver identity).
+def test_bls_silver_rows_are_provider_scoped(test_db_session):
+    # Provider is part of the Silver identity, so a series id is namespaced by
+    # provider and cannot collide with another source's rows.
     db = test_db_session
     bls = BlsProvider("k", transport=FakeTransport(200, _BLS_OK.replace("LNS14000000", "SHARED")))
     mp.ingest_bls_series(bls, db, "SHARED")

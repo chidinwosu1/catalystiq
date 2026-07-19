@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, XCircle } from "lucide-react";
 import { ApiError, getDataSourcesHealth, type DataSourceHealth } from "../lib/api";
 import SectionCard from "../components/SectionCard";
+import RuleBasedMacroContext from "../components/RuleBasedMacroContext";
 
 const DOMAIN_LABEL: Record<string, string> = {
   market_data: "Market data",
@@ -97,6 +98,8 @@ export default function DataSourcesPage() {
         </div>
       )}
 
+      <RuleBasedMacroContext />
+
       {byDomain.map(([domain, sources]) => (
         <SectionCard key={domain} title={DOMAIN_LABEL[domain] ?? domain}>
           <div className="space-y-2">
@@ -143,6 +146,12 @@ export default function DataSourcesPage() {
                 {s.missing_settings.length > 0 && (
                   <p className="mt-2 text-[11px] text-status-warning">
                     Missing config: {s.missing_settings.join(", ")}
+                  </p>
+                )}
+
+                {s.ephemeral && (
+                  <p className="mt-2 text-[11px] text-ink-muted">
+                    {s.note ?? "Ephemeral (no-store): fetched on demand, never persisted."}
                   </p>
                 )}
               </div>

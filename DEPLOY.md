@@ -93,7 +93,7 @@ fail startup, so set the flag **and** its key together.
 | Source | Vars |
 |---|---|
 | SEC EDGAR | `ENABLE_SEC_EDGAR=true`, `SEC_USER_AGENT="Catalyst IQ you@example.com"` |
-| FRED/ALFRED | `ENABLE_FRED=true`, `FRED_API_KEY=…` |
+| FRED (ephemeral macro panel) | `ENABLE_FRED=true`, `FRED_API_KEY=…` — isolated, no-store, allowlisted public-domain series only; see [`FRED_COMPLIANCE.md`](./FRED_COMPLIANCE.md) |
 | BLS | `ENABLE_BLS=true`, `BLS_API_KEY=…` |
 | BEA | `ENABLE_BEA=true`, `BEA_API_KEY=…` |
 | Twelve Data | `ENABLE_TWELVE_DATA=true`, `TWELVE_DATA_API_KEY=…` |

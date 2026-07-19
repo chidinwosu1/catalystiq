@@ -16,10 +16,10 @@ def test_generalized_fields_persist(test_db_session):
     now = dt.datetime(2026, 7, 18, 12, 0, 0)
     run = models.BronzeIngestionRun(
         domain="macro",
-        requested_symbol="DGS10",  # legacy field still required/non-null
-        requested_identifier="DGS10",
-        dataset="series/observations",
-        endpoint="https://api.stlouisfed.org/fred/series/observations",
+        requested_symbol="LNS14000000",  # legacy field still required/non-null
+        requested_identifier="LNS14000000",
+        dataset="timeseries",
+        endpoint="https://api.bls.gov/publicAPI/v2/timeseries/data/",
         data_classification="revised",
         license_classification="public_domain",
         response_timestamp=now,
@@ -30,7 +30,7 @@ def test_generalized_fields_persist(test_db_session):
         error_category=None,
         payload_checksum="a" * 64,
         payload_reference="s3://bucket/key",
-        provider="fred",
+        provider="bls",
         requested_at=now,
         status=IngestionStatus.SUCCEEDED.value,
     )
@@ -39,8 +39,8 @@ def test_generalized_fields_persist(test_db_session):
     db.refresh(run)
 
     fetched = db.query(models.BronzeIngestionRun).filter_by(id=run.id).one()
-    assert fetched.requested_identifier == "DGS10"
-    assert fetched.dataset == "series/observations"
+    assert fetched.requested_identifier == "LNS14000000"
+    assert fetched.dataset == "timeseries"
     assert fetched.data_classification == "revised"
     assert fetched.license_classification == "public_domain"
     assert fetched.http_status == 200

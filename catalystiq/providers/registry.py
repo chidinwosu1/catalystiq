@@ -49,6 +49,10 @@ class SourceDescriptor:
     # Extra config attributes that are optional (surfaced in health, not
     # required for the source to count as configured).
     optional_settings: tuple[str, ...] = field(default_factory=tuple)
+    # Ephemeral sources are fetched on demand and NEVER persisted (no Bronze/
+    # Silver/Gold rows), so "last ingest"/"freshness" are intentionally absent
+    # in health. Used for the compliance-isolated FRED integration.
+    ephemeral: bool = False
 
 
 # Ordered by domain to mirror the spec's provider tree (§1). base_urls are
@@ -98,7 +102,12 @@ SOURCE_REGISTRY: list[SourceDescriptor] = [
         license=LicenseClassification.PUBLIC_DOMAIN,
         base_urls=("https://api.stlouisfed.org/fred", "https://api.stlouisfed.org/fred/series/observations"),
         implemented=True,
-        notes="FRED + ALFRED (realtime/vintage params) via the same key.",
+        ephemeral=True,
+        notes=(
+            "Ephemeral, allowlisted macro context only (no storage/cache, no "
+            "AI/ML use) - served no-store via /fred, never persisted. See "
+            "FRED_COMPLIANCE.md."
+        ),
     ),
     SourceDescriptor(
         name="bls",
@@ -252,9 +261,9 @@ def build_adapter(name: str, settings=None):
 
         return get_calendar_provider()
     if name == "fred":
-        from catalystiq.providers.macro import get_macro_provider
+        from catalystiq.fred.provider import get_fred_client
 
-        return get_macro_provider()
+        return get_fred_client()
     if name == "sec_edgar":
         from catalystiq.providers.fundamentals import get_fundamentals_provider
 

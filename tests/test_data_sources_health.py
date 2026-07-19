@@ -34,18 +34,31 @@ def test_provider_health_reports_missing_settings_names_only(client):
 
 
 def test_provider_health_reports_last_ingestion(client, test_db_session):
+    # BLS is a persisted macro source; its health reflects Bronze runs. (FRED is
+    # ephemeral and never creates runs - covered separately in test_fred_compliance.)
     db = test_db_session
     now = dt.datetime(2026, 7, 18, 12, 0, 0)
     db.add(
         models.BronzeIngestionRun(
-            domain="macro", requested_symbol="DGS10", provider="fred",
+            domain="macro", requested_symbol="LNS14000000", provider="bls",
             requested_at=now, completed_at=now, status="succeeded", record_count=5,
         )
     )
     db.commit()
-    resp = client.get("/data-sources/fred/health")
+    resp = client.get("/data-sources/bls/health")
     assert resp.status_code == 200
     assert resp.json()["last_successful_ingestion_at"] is not None
+
+
+def test_ephemeral_source_reports_no_ingestion(client, test_db_session):
+    # FRED is ephemeral: health never reports an ingestion timestamp, even if a
+    # stray run row existed - it is not persisted through FRED.
+    resp = client.get("/data-sources/fred/health")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ephemeral"] is True
+    assert body["last_successful_ingestion_at"] is None
+    assert body["data_freshness_at"] is None
 
 
 def test_unknown_provider_404(client):

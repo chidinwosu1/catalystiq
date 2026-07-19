@@ -302,11 +302,17 @@ is a new row and the originally-known value is never overwritten; likewise an
 amended SEC filing's facts are preserved alongside the originals, with the
 latest-filed value surfaced as active.
 
-Read-only endpoints: `GET /market-calendar/sessions`, `GET /macro/series/{id}`,
-`GET /macro/series/{id}/observations?as_of=&source=fred|bls`,
-`GET /macro/releases`, `GET /macro/bea?table=`, `GET /fundamentals/{symbol}`,
-`GET /filings/{symbol}`, `GET /short-interest/{symbol}`,
-`GET /short-sale-volume/{symbol}`.
+Read-only endpoints: `GET /market-calendar/sessions`,
+`GET /macro/series/{id}/observations?source=bls`, `GET /macro/bea?table=`,
+`GET /fundamentals/{symbol}`, `GET /filings/{symbol}`,
+`GET /short-interest/{symbol}`, `GET /short-sale-volume/{symbol}`.
+
+**FRED is a special case (compliance).** It is *not* served through the macro
+Silver layer: it is an isolated, ephemeral, allowlisted macro-context source
+that is never persisted, cached, logged, or fed to any score/model/order path.
+It lives behind its own `GET /fred/context` (and `/fred/series`) endpoints,
+served `Cache-Control: no-store`, and drives the "Rule-Based Macroeconomic
+Context" panel with the required attribution. See **`FRED_COMPLIANCE.md`**.
 
 Phase 3 Silver products added: `silver_bea_value`, `silver_short_sale_volume`
 / `silver_short_interest` (separate datasets; a corrected FINRA file is kept

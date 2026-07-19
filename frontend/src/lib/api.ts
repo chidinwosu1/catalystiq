@@ -262,6 +262,9 @@ export interface DataSourceSummary {
   configured: boolean;
   requires_api_key: boolean;
   license: string;
+  // Ephemeral sources (e.g. FRED) are never persisted, so ingestion/freshness
+  // are intentionally absent.
+  ephemeral?: boolean;
 }
 
 export interface DataSourceHealth extends DataSourceSummary {
@@ -271,10 +274,58 @@ export interface DataSourceHealth extends DataSourceSummary {
   last_failure_at: string | null;
   circuit_breaker: string;
   data_freshness_at: string | null;
+  note?: string;
 }
 
 export function getDataSourcesHealth(): Promise<DataSourceHealth[]> {
   return request("/data-sources/health");
+}
+
+// --- Rule-Based Macroeconomic Context (FRED, ephemeral) ----------------
+// FRED data is fetched on demand, shown ephemerally with required attribution,
+// and NEVER persisted or fed to any score/model/order path. The backend serves
+// these responses with Cache-Control: no-store.
+
+export interface MacroIndicatorPoint {
+  date: string;
+  value: number | null;
+}
+
+export interface MacroIndicator {
+  series_id: string;
+  title: string;
+  owner: string;
+  attribution: string;
+  purpose: string;
+  units: string;
+  frequency: string;
+  status: "ok" | "no_data" | "unavailable" | "pending";
+  detail?: string;
+  recent?: MacroIndicatorPoint[];
+  latest_value?: number;
+  latest_date?: string;
+  prior_value?: number;
+  prior_date?: string;
+  change?: number;
+}
+
+export interface MacroContext {
+  panel: string;
+  notice: string;
+  disclaimer: string;
+  terms_reviewed_url: string;
+  terms_reviewed_date: string;
+  as_of: string | null;
+  ephemeral: boolean;
+  available: boolean;
+  reason?: string;
+  retrieved_at?: string;
+  indicators: MacroIndicator[];
+}
+
+/** The ephemeral macro-context panel. Never cached; not persisted. */
+export function getFredContext(): Promise<MacroContext> {
+  return request("/fred/context");
 }
 
 export function getQuote(symbol: string): Promise<Quote> {
