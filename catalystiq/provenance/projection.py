@@ -60,7 +60,8 @@ def provenance_from_bronze_run(
     run,
     *,
     source_event_timestamp: dt.datetime | None,
-    data_quality_status: DataQualityStatus | str = DataQualityStatus.VALID,
+    data_quality_status: DataQualityStatus | str = DataQualityStatus.OK,
+    available_at_timestamp: dt.datetime | None = None,
     source_record_id: str | None = None,
     source_dataset: str | None = None,
     source_url: str | None = None,
@@ -69,9 +70,13 @@ def provenance_from_bronze_run(
 ) -> PointInTimeProvenance:
     """Build the shared contract for a record whose provenance lives on its
     Bronze ingestion run (e.g. SilverPriceBar). Uses the run's provider and
-    timestamps; the caller supplies the record's own event time and quality."""
+    timestamps; the caller supplies the record's own event time and quality.
+
+    `available_at_timestamp` overrides the run-level availability when the record
+    carries its own point-in-time floor (SilverPriceBar.source_available_at, the
+    end-of-day of the bar), which is more precise than the batch fetch time."""
     retrieved = getattr(run, "completed_at", None) or getattr(run, "requested_at", None)
-    available = getattr(run, "release_timestamp", None) or retrieved
+    available = available_at_timestamp or getattr(run, "release_timestamp", None) or retrieved
     quality = (
         data_quality_status
         if isinstance(data_quality_status, DataQualityStatus)

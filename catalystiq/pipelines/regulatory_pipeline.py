@@ -57,7 +57,7 @@ def _mixin(*, stable_identifier, provider, source_record_id, effective_at, run_i
     now = _now()
     return dict(
         stable_identifier=stable_identifier, provider=provider,
-        source_record_id=source_record_id, source_available_at=None,
+        source_record_id=source_record_id, source_available_at=now,  # PIT floor
         effective_at=effective_at, retrieved_at=now, bronze_ingestion_run_id=run_id,
         validation_status="clean", data_quality_warnings=None,
         normalization_version=NORMALIZATION_VERSION,

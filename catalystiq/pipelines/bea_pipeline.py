@@ -95,7 +95,7 @@ def build_silver_bea(
             stable_identifier=f"{v.dataset}:{v.table_name}:{v.line_number}",
             provider=provider,
             source_record_id=f"{v.table_name}:{v.line_number}:{v.time_period}",
-            source_available_at=None,
+            source_available_at=now,  # PIT floor (<= retrieved_at); safe vs look-ahead
             effective_at=None,
             retrieved_at=now,
             bronze_ingestion_run_id=doc.ingestion_run_id,

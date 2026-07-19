@@ -148,8 +148,22 @@ def test_build_silver_upserts_clean_bars(test_db_session):
     silver_rows = test_db_session.query(models.SilverPriceBar).count()
     assert silver_rows == 300
     row = test_db_session.query(models.SilverPriceBar).order_by(models.SilverPriceBar.date).first()
-    assert row.data_quality_status == "clean"
+    # The live Silver bar carries the canonical ML vocabulary (ok|stale|imputed|
+    # missing|invalid); an accepted, warning-free bar is "ok".
+    assert row.data_quality_status == "ok"
+    # source_available_at is a point-in-time floor (end-of-day of the bar date),
+    # never after the bar it describes.
+    assert row.source_available_at is not None
+    assert row.source_available_at.date() == row.date
     assert row.source_bronze_ingestion_run_id == run.id
+    # The legacy fine-grained status is preserved in the immutable build-run
+    # audit snapshot for reproducibility.
+    snap = (
+        test_db_session.query(models.SilverBuildRunBar)
+        .order_by(models.SilverBuildRunBar.bar_date)
+        .first()
+    )
+    assert snap.data_quality_status == "clean"
 
 
 def test_build_silver_is_idempotent(test_db_session):
@@ -201,13 +215,24 @@ def test_build_silver_flags_but_keeps_abnormal_gap_bar(test_db_session):
 
     assert result.upserted == 300
     assert result.rejected == 0
-    flagged = (
-        test_db_session.query(models.SilverPriceBar)
+    # The immutable build snapshot preserves the legacy fine-grained status;
+    # find the flagged bar there (the JSON remediation column stores None as
+    # JSON null, so it can't be filtered on reliably in SQL).
+    flagged_snaps = (
+        test_db_session.query(models.SilverBuildRunBar)
         .filter_by(data_quality_status="clean_with_warnings")
         .all()
     )
-    assert len(flagged) >= 1
-    assert flagged[0].remediation_actions is not None
+    assert len(flagged_snaps) >= 1
+    # The corresponding live Silver bar stays a genuine observed value ("ok" in
+    # the ML vocabulary) with its warning reasons retained in remediation_actions.
+    flagged_bar = (
+        test_db_session.query(models.SilverPriceBar)
+        .filter_by(date=flagged_snaps[0].bar_date)
+        .one()
+    )
+    assert flagged_bar.data_quality_status == "ok"
+    assert flagged_bar.remediation_actions is not None
 
 
 def test_build_silver_passes_through_live_quote_cross_check(test_db_session):

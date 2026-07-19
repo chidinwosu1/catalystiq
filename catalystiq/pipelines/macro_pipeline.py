@@ -109,7 +109,11 @@ def _mixin_fields(*, stable_identifier, provider, source_record_id, effective_at
         stable_identifier=stable_identifier,
         provider=provider,
         source_record_id=source_record_id,
-        source_available_at=None,
+        # Conservative point-in-time floor: we could not have known the value
+        # before we retrieved it, so available_at defaults to the retrieval time
+        # (<= retrieved_at). A source with a true earlier release time may refine
+        # this later; the floor is safe against look-ahead.
+        source_available_at=now,
         effective_at=effective_at,
         retrieved_at=now,
         bronze_ingestion_run_id=run_id,
