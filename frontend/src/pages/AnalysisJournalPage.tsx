@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Loader2, Plus, Search } from "lucide-react";
+import { AlertTriangle, Loader2, Plus } from "lucide-react";
 import {
   ApiError,
   getQuote,
@@ -12,6 +12,7 @@ import SectionCard from "../components/SectionCard";
 import StatTile from "../components/StatTile";
 import StrategyOverview from "../components/StrategyOverview";
 import RuleBasedOpportunityScore from "../components/RuleBasedOpportunityScore";
+import TickerSearch from "../components/TickerSearch";
 import { getDemoAnalysis } from "../mockAnalysisDetail";
 import BehavioralAnalysisTable from "../components/BehavioralAnalysisTable";
 import WorkflowBar from "../components/trade/WorkflowBar";
@@ -113,7 +114,6 @@ export default function AnalysisJournalPage({
   onTrade,
   onNavigate,
 }: AnalysisJournalPageProps) {
-  const [symbolInput, setSymbolInput] = useState(initialSymbol || "AAPL");
   const [symbol, setSymbol] = useState((initialSymbol || "AAPL").toUpperCase());
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
@@ -129,7 +129,6 @@ export default function AnalysisJournalPage({
 
   useEffect(() => {
     if (initialSymbol) {
-      setSymbolInput(initialSymbol);
       setSymbol(initialSymbol.toUpperCase());
     }
   }, [initialSymbol]);
@@ -210,11 +209,6 @@ export default function AnalysisJournalPage({
     };
   }, [symbol, demoAnalysis, quote]);
 
-  function handleSymbolSubmit(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key !== "Enter") return;
-    setSymbol(symbolInput.trim().toUpperCase());
-  }
-
   function addEntry() {
     setEntries((prev) => [{ ...draft, id: crypto.randomUUID() }, ...prev]);
     setDraft(emptyDraft(symbol));
@@ -269,17 +263,11 @@ export default function AnalysisJournalPage({
     <div className="space-y-6">
       <WorkflowBar current={2} onNavigate={onNavigate} />
 
-      <label className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink-muted focus-within:border-brand-blue/50">
-        <Search size={15} />
-        <input
-          type="text"
-          value={symbolInput}
-          onChange={(e) => setSymbolInput(e.target.value)}
-          onKeyDown={handleSymbolSubmit}
-          placeholder="Research a ticker — press Enter…"
-          className="w-full bg-transparent text-ink-primary placeholder:text-ink-muted focus:outline-none"
-        />
-      </label>
+      <TickerSearch
+        value={symbol}
+        placeholder="Research a ticker or company…"
+        onSelect={(s) => setSymbol(s)}
+      />
 
       {quoteLoading && (
         <div className="flex items-center gap-2 text-sm text-ink-secondary">

@@ -31,6 +31,7 @@ import {
 } from "../lib/api";
 import SectionCard from "../components/SectionCard";
 import NextAction from "../components/NextAction";
+import TickerSearch from "../components/TickerSearch";
 import WorkflowBar from "../components/trade/WorkflowBar";
 import type { PageId } from "../types/nav";
 import {
@@ -103,7 +104,6 @@ export default function TradeTicketPage({
   onViewAnalysis,
   onNavigate,
 }: TradeTicketPageProps) {
-  const [symbolInput, setSymbolInput] = useState(initialSymbol);
   const [symbol, setSymbol] = useState(initialSymbol.trim().toUpperCase());
 
   const [quote, setQuote] = useState<Quote | null>(null);
@@ -154,7 +154,6 @@ export default function TradeTicketPage({
   const [scheduledResult, setScheduledResult] = useState<ScheduledOrderRecord | null>(null);
 
   useEffect(() => {
-    setSymbolInput(initialSymbol);
     setSymbol(initialSymbol.trim().toUpperCase());
   }, [initialSymbol]);
 
@@ -254,14 +253,6 @@ export default function TradeTicketPage({
       controller.abort();
     };
   }, [symbol]);
-
-  function handleSymbolSubmit(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key !== "Enter") return;
-    setReviewing(false);
-    setSubmitResult(null);
-    setSubmitError(null);
-    setSymbol(symbolInput.trim().toUpperCase());
-  }
 
   function handleTradingStyleChange(style: TradingStyle) {
     setTradingStyle(style);
@@ -384,7 +375,6 @@ export default function TradeTicketPage({
 
   function loadOrderIntoTicket(record: ScheduledOrderRecord) {
     const o = record.order;
-    setSymbolInput(record.symbol);
     setSymbol(record.symbol.toUpperCase());
     setSide(o.side);
     setOrderType(o.type);
@@ -536,13 +526,15 @@ export default function TradeTicketPage({
       </SectionCard>
 
       <SectionCard title="Ticker">
-        <input
-          type="text"
-          placeholder="Search ticker, press Enter…"
-          value={symbolInput}
-          onChange={(e) => setSymbolInput(e.target.value)}
-          onKeyDown={handleSymbolSubmit}
-          className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-ink-primary placeholder:text-ink-muted focus:border-brand-blue/50 focus:outline-none"
+        <TickerSearch
+          value={symbol}
+          placeholder="Search ticker or company…"
+          onSelect={(s) => {
+            setReviewing(false);
+            setSubmitResult(null);
+            setSubmitError(null);
+            setSymbol(s);
+          }}
         />
 
         {quoteLoading && (
