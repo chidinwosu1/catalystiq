@@ -55,3 +55,19 @@ class NewsItem(BaseModel):
     published_at: dt.datetime
     category: str | None = None
     summary: str | None = None
+
+
+class SymbolSearchResult(BaseModel):
+    symbol: str
+    instrument_name: str | None = None
+    exchange: str | None = None
+    instrument_type: str | None = None
+    country: str | None = None
+    currency: str | None = None
+
+
+class ExchangeInfo(BaseModel):
+    name: str
+    code: str | None = None
+    country: str | None = None
+    timezone: str | None = None

@@ -9,7 +9,8 @@ export type PageId =
   | "markets"
   | "analysis"
   | "ticket"
-  | "preferences";
+  | "preferences"
+  | "data-sources";
 
 export interface PageDescriptor {
   id: PageId;
@@ -42,5 +43,11 @@ export const PAGES: PageDescriptor[] = [
     label: "Portfolio",
     description:
       "Your real account balance and positions from the connected paper-trading broker.",
+  },
+  {
+    id: "data-sources",
+    label: "Data Sources",
+    description:
+      "Health of every integrated data source - enabled/configured state, last ingestion, failures, and freshness.",
   },
 ];

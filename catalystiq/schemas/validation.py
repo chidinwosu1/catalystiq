@@ -29,3 +29,21 @@ class DataQualityReport(BaseModel):
     issues: list[DataQualityIssue]
     checked_at: dt.datetime
     bar_count: int
+
+
+class ProviderComparisonRecord(BaseModel):
+    domain: str
+    symbol: str
+    field: str
+    as_of_date: dt.date | None = None
+    primary_provider: str
+    primary_value: float | None = None
+    secondary_provider: str
+    secondary_value: float | None = None
+    absolute_diff: float | None = None
+    relative_diff_pct: float | None = None
+    tolerance_pct: float
+    within_tolerance: bool
+    selected_provider: str
+    selected_reason: str
+    created_at: dt.datetime

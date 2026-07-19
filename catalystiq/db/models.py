@@ -23,6 +23,37 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from catalystiq.db.base import Base
 
 
+class SilverRecordMixin:
+    """The common columns every normalized Silver record carries (spec §14),
+    so a downstream consumer can trace, validate, and reproduce any record
+    uniformly regardless of domain. Concrete Silver tables inherit this and
+    add their own domain-specific identity/value columns plus a `payload`.
+
+    `stable_identifier` is the domain's stable key (symbol, FRED series id,
+    CIK, exchange+session-date, ...) - never a value that can be reused or
+    reassigned across entities. `normalization_version` is bumped when a
+    normalizer's field-mapping changes, mirroring adapter/calculation
+    versioning elsewhere."""
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    stable_identifier: Mapped[str] = mapped_column(String(100), index=True)
+    provider: Mapped[str] = mapped_column(String(50))
+    # The source's own record identifier (accession no., observation key, ...).
+    source_record_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # When the datum became available at the source, distinct from when we
+    # retrieved it and from its effective/observation time.
+    source_available_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    effective_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    retrieved_at: Mapped[dt.datetime] = mapped_column(DateTime)
+    bronze_ingestion_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("bronze_ingestion_run.id"), nullable=True
+    )
+    validation_status: Mapped[str] = mapped_column(String(20), default="clean")
+    data_quality_warnings: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    normalization_version: Mapped[str] = mapped_column(String(20), default="1.0.0")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+
 class Ticker(Base):
     __tablename__ = "tickers"
 
@@ -62,12 +93,45 @@ class BronzeIngestionRun(Base):
     requested_at: Mapped[dt.datetime] = mapped_column(DateTime)
     started_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
-    # partial: reserved for a future multi-call ingestion path - the
-    # current single-provider-call design can only ever land on succeeded
-    # or failed (see market_price_pipeline.py's ingest_bronze() docstring).
+    # Allowed values are the IngestionStatus set (catalystiq/providers/base.py):
+    # running | succeeded | partial | failed | rate_limited | unavailable.
+    # The single-provider-call price pipeline only lands on succeeded/failed
+    # today; the rest exist for the network-backed adapters added later.
     status: Mapped[str] = mapped_column(String(20), default="running", index=True)
     bars_fetched: Mapped[int] = mapped_column(Integer, default=0)
     error_detail: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+
+    # --- Generalized ingestion-run fields (spec §3) -------------------
+    # Added additively so this one table serves every data domain, not just
+    # market_price. All nullable: the existing price-bar path leaves them
+    # unset and keeps writing requested_symbol/bars_fetched above. Network-
+    # backed adapters (Phase 2+) populate these.
+    #
+    # `requested_identifier` is the domain-agnostic form of "what was
+    # requested" (symbol, CIK, FRED/BLS series id, BEA table+line, ...);
+    # `requested_symbol` stays the market-data specialization.
+    requested_identifier: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    dataset: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    endpoint: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    data_classification: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    license_classification: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    # Provider's own response timestamp, and the original data-release
+    # timestamp when the provider exposes one - kept distinct from
+    # requested_at/completed_at (which are our clock), never conflated.
+    response_timestamp: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    release_timestamp: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Domain-agnostic record count (bars_fetched is the price-bar alias).
+    record_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rate_limit_info: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Normalized ProviderErrorCategory value; error_detail holds the
+    # sanitized (secret-free) message.
+    error_category: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    # Integrity + reference for the raw payload. `payload_reference` points
+    # at immutable external storage when the payload is too large to inline.
+    payload_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    payload_reference: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
 
 class BronzeMarketPriceBar(Base):
@@ -113,9 +177,322 @@ class BronzeMarketQuote(Base):
     ingested_at: Mapped[dt.datetime] = mapped_column(DateTime)
 
 
+class BronzeRawDocument(Base):
+    """Generic append-only store for a raw provider payload from any
+    document/record source (SEC filings & facts, FRED series/observations,
+    the NYSE schedule snapshot, ...). Complements the domain-specific Bronze
+    tables above (BronzeMarketPriceBar/Quote): those predate this and stay
+    as-is; new network/document domains land here instead of getting a
+    bespoke Bronze table each.
+
+    Append-only like all Bronze - a re-ingest writes a new row (new
+    ingestion run), never overwrites a prior payload. `payload_checksum`
+    lets a Silver build detect an unchanged document and skip reprocessing."""
+
+    __tablename__ = "bronze_raw_document"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ingestion_run_id: Mapped[int] = mapped_column(
+        ForeignKey("bronze_ingestion_run.id"), index=True
+    )
+    domain: Mapped[str] = mapped_column(String(50), index=True)
+    # The requested/source identifier this document is for (symbol, CIK,
+    # series id, "NYSE", ...).
+    source_identifier: Mapped[str] = mapped_column(String(100), index=True)
+    document_type: Mapped[str] = mapped_column(String(50))
+    payload: Mapped[dict] = mapped_column(JSON)
+    payload_checksum: Mapped[str] = mapped_column(String(64), index=True)
+    source_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    source_timestamp: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    fetched_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+
 # --- Silver: validated, deduplicated, normalized. Reads only from Bronze.
 # Unique on (ticker, date) - Silver IS the current-best-known clean view,
 # so upserting here on reprocessing is correct (unlike Bronze).
+
+class SilverMarketSession(Base, SilverRecordMixin):
+    """Normalized exchange trading session (§10). The market-calendar Silver
+    product used to decide the latest completed session, whether an intraday
+    candle is complete, and staleness - a real calendar, not a flat 24h
+    rule. Idempotent: upserted on (exchange, session_date)."""
+
+    __tablename__ = "silver_market_session"
+    __table_args__ = (
+        UniqueConstraint("exchange", "session_date", name="uq_silver_market_session"),
+    )
+
+    exchange: Mapped[str] = mapped_column(String(15), index=True)
+    session_date: Mapped[dt.date] = mapped_column(index=True)
+    open_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    close_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    timezone: Mapped[str] = mapped_column(String(40))
+    early_close: Mapped[bool] = mapped_column(default=False)
+    holiday_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    calendar_version: Mapped[str] = mapped_column(String(30))
+
+
+class SilverMacroSeries(Base, SilverRecordMixin):
+    """Normalized macro series metadata (§9's macro_series). Idempotent on
+    (provider, series_id)."""
+
+    __tablename__ = "silver_macro_series"
+    __table_args__ = (
+        UniqueConstraint("provider", "series_id", name="uq_silver_macro_series"),
+    )
+
+    series_id: Mapped[str] = mapped_column(String(50), index=True)
+    title: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    frequency: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    units: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    seasonal_adjustment: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    observation_start: Mapped[dt.date | None] = mapped_column(nullable=True)
+    observation_end: Mapped[dt.date | None] = mapped_column(nullable=True)
+
+
+class SilverMacroObservation(Base, SilverRecordMixin):
+    """Normalized macro observation with point-in-time vintage (§7). Unique on
+    (provider, series_id, observation_date, realtime_start) so every vintage
+    of a given observation date coexists - a revised value is a NEW row, the
+    originally-known value is never overwritten. `value` is None for a
+    missing observation, never fabricated."""
+
+    __tablename__ = "silver_macro_observation"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "series_id",
+            "observation_date",
+            "realtime_start",
+            name="uq_silver_macro_observation_vintage",
+        ),
+    )
+
+    series_id: Mapped[str] = mapped_column(String(50), index=True)
+    observation_date: Mapped[dt.date] = mapped_column(index=True)
+    value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    realtime_start: Mapped[dt.date | None] = mapped_column(nullable=True)
+    realtime_end: Mapped[dt.date | None] = mapped_column(nullable=True)
+    units: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    frequency: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    seasonal_adjustment: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Provider-specific source fields (BLS footnotes/period/preliminary, ...),
+    # so the shared observation model doesn't drop a source's own metadata.
+    source_fields: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+
+class SilverEconomicRelease(Base, SilverRecordMixin):
+    """Normalized economic release (§11's economic_release). Keeps scheduled
+    release date and actual publication timestamp as distinct concepts (§7).
+    Idempotent on (provider, release_id, scheduled_date)."""
+
+    __tablename__ = "silver_economic_release"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider", "release_id", "scheduled_date", name="uq_silver_economic_release"
+        ),
+    )
+
+    release_id: Mapped[str] = mapped_column(String(30), index=True)
+    name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    scheduled_date: Mapped[dt.date | None] = mapped_column(nullable=True)
+    actual_published_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    press_release: Mapped[bool | None] = mapped_column(nullable=True)
+    link: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
+class SilverBeaValue(Base, SilverRecordMixin):
+    """Normalized BEA table value (§9). Idempotent on
+    (provider, dataset, table_name, line_number, time_period, frequency).
+    Nominal/real/annualized/SA values are distinguished by their table +
+    unit, never merged."""
+
+    __tablename__ = "silver_bea_value"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider", "dataset", "table_name", "line_number", "time_period", "frequency",
+            name="uq_silver_bea_value",
+        ),
+    )
+
+    dataset: Mapped[str] = mapped_column(String(30), index=True)
+    table_name: Mapped[str] = mapped_column(String(40), index=True)
+    line_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    line_description: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    series_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    time_period: Mapped[str] = mapped_column(String(20), index=True)
+    frequency: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    unit: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    scale: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+
+class SilverSecurityIdentifier(Base, SilverRecordMixin):
+    """Ticker <-> CIK mapping (§6). Idempotent on (provider, cik). `symbol`
+    is indexed but not the identity - tickers can change or be reused, so the
+    CIK is the stable key (spec §12 principle)."""
+
+    __tablename__ = "silver_security_identifier"
+    __table_args__ = (
+        UniqueConstraint("provider", "cik", name="uq_silver_security_identifier"),
+    )
+
+    cik: Mapped[str] = mapped_column(String(10), index=True)
+    symbol: Mapped[str] = mapped_column(String(15), index=True)
+    name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+
+class SilverCompanyFiling(Base, SilverRecordMixin):
+    """A company filing's metadata (§6). Idempotent on
+    (provider, accession_number) - the accession number is SEC's stable id
+    for a filing."""
+
+    __tablename__ = "silver_company_filing"
+    __table_args__ = (
+        UniqueConstraint("provider", "accession_number", name="uq_silver_company_filing"),
+    )
+
+    cik: Mapped[str] = mapped_column(String(10), index=True)
+    symbol: Mapped[str | None] = mapped_column(String(15), nullable=True)
+    form: Mapped[str] = mapped_column(String(20), index=True)
+    accession_number: Mapped[str] = mapped_column(String(30), index=True)
+    filing_date: Mapped[dt.date | None] = mapped_column(nullable=True, index=True)
+    acceptance_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    report_date: Mapped[dt.date | None] = mapped_column(nullable=True)
+    primary_document: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    primary_doc_description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_amendment: Mapped[bool] = mapped_column(default=False)
+    source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
+class SilverCompanyFact(Base, SilverRecordMixin):
+    """One normalized XBRL company fact (§6) - also serves as the financial-
+    statement fact (an XBRL fact IS a statement-line fact), so it isn't
+    duplicated into a second table.
+
+    Identity includes the accession number, so an amended filing's value
+    lands as a NEW row rather than overwriting the originally-filed value
+    (§6); `is_amendment` flags it and `filing_date` orders vintages. The
+    active value for a (concept, unit, period) is the row with the latest
+    filing_date - see fundamentals_pipeline.get_active_facts()."""
+
+    __tablename__ = "silver_company_fact"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "cik",
+            "accession_number",
+            "taxonomy",
+            "concept",
+            "unit",
+            "period_start",
+            "period_end",
+            name="uq_silver_company_fact",
+        ),
+    )
+
+    cik: Mapped[str] = mapped_column(String(10), index=True)
+    taxonomy: Mapped[str] = mapped_column(String(30))
+    concept: Mapped[str] = mapped_column(String(120), index=True)
+    unit: Mapped[str] = mapped_column(String(30))
+    value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fiscal_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fiscal_period: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    period_start: Mapped[dt.date | None] = mapped_column(nullable=True)
+    period_end: Mapped[dt.date | None] = mapped_column(nullable=True)
+    form: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    filing_date: Mapped[dt.date | None] = mapped_column(nullable=True)
+    accession_number: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    is_amendment: Mapped[bool] = mapped_column(default=False)
+    frame: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+
+class SilverMaterialEvent(Base, SilverRecordMixin):
+    """An 8-K material event (§6). Idempotent on (provider, accession_number)."""
+
+    __tablename__ = "silver_material_event"
+    __table_args__ = (
+        UniqueConstraint("provider", "accession_number", name="uq_silver_material_event"),
+    )
+
+    cik: Mapped[str] = mapped_column(String(10), index=True)
+    symbol: Mapped[str | None] = mapped_column(String(15), nullable=True)
+    accession_number: Mapped[str] = mapped_column(String(30), index=True)
+    form: Mapped[str] = mapped_column(String(20))
+    filing_date: Mapped[dt.date | None] = mapped_column(nullable=True, index=True)
+    acceptance_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    items: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    is_amendment: Mapped[bool] = mapped_column(default=False)
+    source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
+class SilverSecurityMaster(Base, SilverRecordMixin):
+    """Security master / symbol directory (§12, §14 #1). Keyed on a stable
+    internal security id, NOT the ticker alone (tickers can change or be
+    reused). Idempotent on (provider, internal_security_id)."""
+
+    __tablename__ = "silver_security_master"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider", "internal_security_id", name="uq_silver_security_master"
+        ),
+    )
+
+    internal_security_id: Mapped[str] = mapped_column(String(60), index=True)
+    symbol: Mapped[str] = mapped_column(String(15), index=True)
+    name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    exchange: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    listing_market: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    etf: Mapped[bool | None] = mapped_column(nullable=True)
+    test_issue: Mapped[bool | None] = mapped_column(nullable=True)
+    is_active: Mapped[bool] = mapped_column(default=True)
+
+
+class SilverShortSaleVolume(Base, SilverRecordMixin):
+    """Daily short-sale volume (§11) - a SEPARATE dataset from short interest.
+    Idempotent on (provider, symbol, trade_date, reporting_facility,
+    file_version); file_version is in the key so a corrected file is
+    preserved alongside the original."""
+
+    __tablename__ = "silver_short_sale_volume"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider", "symbol", "trade_date", "reporting_facility", "file_version",
+            name="uq_silver_short_sale_volume",
+        ),
+    )
+
+    symbol: Mapped[str] = mapped_column(String(15), index=True)
+    trade_date: Mapped[dt.date] = mapped_column(index=True)
+    short_volume: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    short_exempt_volume: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_volume: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reporting_facility: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    file_version: Mapped[str] = mapped_column(String(20), default="original")
+
+
+class SilverShortInterest(Base, SilverRecordMixin):
+    """Semi-monthly equity short interest (§11) - a SEPARATE dataset from
+    daily short-sale volume; the two are never conflated. Idempotent on
+    (provider, symbol, settlement_date, file_version)."""
+
+    __tablename__ = "silver_short_interest"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider", "symbol", "settlement_date", "file_version",
+            name="uq_silver_short_interest",
+        ),
+    )
+
+    symbol: Mapped[str] = mapped_column(String(15), index=True)
+    settlement_date: Mapped[dt.date] = mapped_column(index=True)
+    publication_date: Mapped[dt.date | None] = mapped_column(nullable=True)
+    short_interest_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    previous_short_interest_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    average_daily_volume: Mapped[float | None] = mapped_column(Float, nullable=True)
+    days_to_cover: Mapped[float | None] = mapped_column(Float, nullable=True)
+    file_version: Mapped[str] = mapped_column(String(20), default="original")
+
 
 class SilverPriceBar(Base):
     __tablename__ = "silver_price_bar"
@@ -609,6 +986,52 @@ class ScheduledOrder(Base):
     status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
     broker_order_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     error_detail: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+
+class ProviderComparison(Base):
+    """A cross-provider validation result (§5, §16): the primary and
+    secondary providers' values for the same field, their difference, and
+    which was selected and why. Values are recorded, never averaged; an
+    out-of-tolerance row IS the data-quality warning."""
+
+    __tablename__ = "provider_comparison"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    domain: Mapped[str] = mapped_column(String(30), index=True)
+    symbol: Mapped[str] = mapped_column(String(15), index=True)
+    field: Mapped[str] = mapped_column(String(30))  # quote_price | close
+    as_of_date: Mapped[dt.date | None] = mapped_column(nullable=True)
+    primary_provider: Mapped[str] = mapped_column(String(30))
+    primary_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    primary_timestamp: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    secondary_provider: Mapped[str] = mapped_column(String(30))
+    secondary_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    secondary_timestamp: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    absolute_diff: Mapped[float | None] = mapped_column(Float, nullable=True)
+    relative_diff_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tolerance_pct: Mapped[float] = mapped_column(Float)
+    within_tolerance: Mapped[bool] = mapped_column(default=True, index=True)
+    selected_provider: Mapped[str] = mapped_column(String(30))
+    selected_reason: Mapped[str] = mapped_column(String(300))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, index=True)
+
+
+class OrderConfirmationToken(Base):
+    """A single-use, short-lived confirmation token bound to exact order
+    details (§13). Submission consumes it (sets used_at); a replay or a
+    parameter change is rejected. See catalystiq/orders.py."""
+
+    __tablename__ = "order_confirmation_token"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    jti: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    fingerprint: Mapped[str] = mapped_column(String(1000))
+    account_id: Mapped[str] = mapped_column(String(100))
+    mode: Mapped[str] = mapped_column(String(10))  # paper | live
+    estimated_max_loss: Mapped[float | None] = mapped_column(Float, nullable=True)
+    expires_at: Mapped[dt.datetime] = mapped_column(DateTime)
+    used_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime)
 
 

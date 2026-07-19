@@ -1,12 +1,11 @@
 /**
- * Client for the Phase 1 backend (catalystiq/routers/market_data.py).
+ * Client for the Catalyst IQ backend.
  *
- * DEV-ONLY AUTH WARNING: the backend's action endpoints take a single
- * static bearer token (ACTION_API_KEY). Reading it from VITE_ACTION_API_KEY
- * bakes it into the browser bundle, which is fine for local development but
- * is not a real auth model - a shipped build must not do this. Before any
- * real deployment this needs a proper session/BFF layer in front of the API
- * so the raw action key never reaches the browser.
+ * AUTH: the primary auth is a server-side session cookie (httpOnly), set by
+ * POST /auth/login and sent automatically via `credentials: "include"` - the
+ * raw secret never lives in this bundle. A static bearer token is attached
+ * ONLY if VITE_ACTION_API_KEY is explicitly provided (for local/programmatic
+ * use); production builds should leave it unset and rely on the cookie.
  */
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -118,7 +117,9 @@ export interface NewOrder {
   stop_loss_price?: number;
 }
 
-export type ScheduledOrderStatus = "pending" | "submitted" | "failed" | "cancelled";
+// "due" = the scheduled time has passed and the order is ready for manual
+// review/confirmation; it is NEVER submitted automatically (§13).
+export type ScheduledOrderStatus = "pending" | "due" | "submitted" | "failed" | "cancelled";
 
 export interface ScheduledOrderRecord {
   id: number;
@@ -129,6 +130,37 @@ export interface ScheduledOrderRecord {
   broker_order_id: string | null;
   error_detail: string | null;
   created_at: string;
+}
+
+// --- Order confirmation (§13): two-step submit -------------------------
+// Step 1 (confirm) returns the exact details to review plus a single-use,
+// short-lived token bound to them. Step 2 (submit) requires that token; any
+// change to the order invalidates it.
+
+export interface OrderReview {
+  symbol: string;
+  side: OrderSide;
+  type: OrderType;
+  time_in_force: TimeInForce;
+  qty: number | null;
+  notional: number | null;
+  limit_price: number | null;
+  stop_price: number | null;
+  estimated_max_loss: number | null;
+  account_id: string;
+  mode: string;
+}
+
+export interface OrderConfirmation {
+  review: OrderReview;
+  confirmation_token: string;
+  expires_at: string;
+}
+
+export interface BrokerConnectionTest {
+  provider: string;
+  ok: boolean;
+  detail: string;
 }
 
 export type IndicatorStatus = "computed" | "insufficient_data";
@@ -164,14 +196,17 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = { ...(init?.headers as Record<string, string>) };
+  // The session cookie (credentials: "include") is the primary auth; a bearer
+  // is attached only when a dev key is explicitly configured.
+  if (ACTION_API_KEY) headers.Authorization = `Bearer ${ACTION_API_KEY}`;
+
   let response: Response;
   try {
     response = await fetch(`${BASE_URL}${path}`, {
       ...init,
-      headers: {
-        Authorization: `Bearer ${ACTION_API_KEY}`,
-        ...init?.headers,
-      },
+      credentials: "include",
+      headers,
     });
   } catch {
     throw new ApiError(0, `Could not reach the API at ${BASE_URL}. Is the backend running?`);
@@ -189,6 +224,57 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+// --- Auth (session cookie) ---------------------------------------------
+
+export interface SessionStatus {
+  authenticated: boolean;
+  expires_at: string | null;
+}
+
+/** Whether the current browser session is authenticated. */
+export function getSession(): Promise<SessionStatus> {
+  return request("/auth/session");
+}
+
+/** Exchange a password for an httpOnly session cookie. */
+export function login(password: string): Promise<SessionStatus> {
+  return request("/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+}
+
+/** Clear the session cookie. */
+export function logout(): Promise<{ ok: boolean }> {
+  return request("/auth/logout", { method: "POST" });
+}
+
+// --- Data sources (health / admin) -------------------------------------
+
+export interface DataSourceSummary {
+  name: string;
+  domain: string;
+  implemented: boolean;
+  enabled: boolean;
+  configured: boolean;
+  requires_api_key: boolean;
+  license: string;
+}
+
+export interface DataSourceHealth extends DataSourceSummary {
+  missing_settings: string[];
+  last_successful_ingestion_at: string | null;
+  last_failure_category: string | null;
+  last_failure_at: string | null;
+  circuit_breaker: string;
+  data_freshness_at: string | null;
+}
+
+export function getDataSourcesHealth(): Promise<DataSourceHealth[]> {
+  return request("/data-sources/health");
 }
 
 export function getQuote(symbol: string): Promise<Quote> {
@@ -225,12 +311,39 @@ export function getOrders(): Promise<Record<string, unknown>[]> {
   return request("/paper/orders");
 }
 
-export function submitOrder(order: NewOrder): Promise<Record<string, unknown>> {
+/**
+ * Step 1 of order submission (§13): review the exact order details and
+ * receive a single-use, short-lived confirmation token bound to them.
+ * A 403 here means paper submission is disabled (or live is unavailable).
+ */
+export function confirmOrder(order: NewOrder, accountId: string): Promise<OrderConfirmation> {
+  return request("/paper/orders/confirm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ order, account_id: accountId, confirmation_token: "" }),
+  });
+}
+
+/**
+ * Step 2 of order submission (§13): submit with the confirmation token from
+ * confirmOrder(). The token is single-use and bound to these exact details -
+ * any change (or expiry, or reuse) is rejected with a 403.
+ */
+export function submitOrder(
+  order: NewOrder,
+  accountId: string,
+  confirmationToken: string
+): Promise<Record<string, unknown>> {
   return request("/paper/orders", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(order),
+    body: JSON.stringify({ order, account_id: accountId, confirmation_token: confirmationToken }),
   });
+}
+
+/** Read-only Webull reachability check (never places/cancels an order). */
+export function getBrokerConnectionTest(): Promise<BrokerConnectionTest> {
+  return request("/paper/connection-test");
 }
 
 export function cancelOrder(orderId: string): Promise<Record<string, unknown>> {
