@@ -17,8 +17,47 @@ from catalystiq.providers.market_data import (
     MarketDataProvider,
     get_market_data_provider,
 )
-from catalystiq.schemas.market_data import FundamentalsSnapshot, NewsItem, OHLCVBar, Quote
+from catalystiq.schemas.market_data import (
+    FundamentalsSnapshot,
+    NewsItem,
+    OHLCVBar,
+    Quote,
+    QuoteResult,
+    SectorPerformance,
+)
 from catalystiq.schemas.validation import DataQualityReport
+
+# Cap batch size so one request can't fan out into hundreds of provider calls.
+_MAX_BATCH_SYMBOLS = 50
+
+# SPDR sector ETFs -> GICS sector name. Deterministic sector proxy set.
+_SECTOR_ETFS: list[tuple[str, str]] = [
+    ("Technology", "XLK"),
+    ("Financials", "XLF"),
+    ("Health Care", "XLV"),
+    ("Consumer Discretionary", "XLY"),
+    ("Consumer Staples", "XLP"),
+    ("Energy", "XLE"),
+    ("Industrials", "XLI"),
+    ("Materials", "XLB"),
+    ("Utilities", "XLU"),
+    ("Real Estate", "XLRE"),
+    ("Communication Services", "XLC"),
+]
+# Trading sessions to look back for the "weekly" change.
+_WEEK_SESSIONS = 5
+
+
+def _pct_change(bars: list[OHLCVBar], lookback: int) -> float | None:
+    """Percent change of the latest close vs. `lookback` sessions earlier.
+    None if there isn't enough history (never fabricated)."""
+    if len(bars) <= lookback:
+        return None
+    latest = bars[-1].close
+    prior = bars[-1 - lookback].close
+    if not prior:
+        return None
+    return (latest / prior - 1.0) * 100.0
 
 router = APIRouter(
     prefix="/market-data",
@@ -35,6 +74,42 @@ def get_quote(symbol: str, provider: MarketDataProvider = Depends(get_market_dat
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@router.get("/quotes", response_model=list[QuoteResult])
+def get_quotes(
+    symbols: str = Query(..., description="Comma-separated symbols, e.g. AAPL,MSFT,^VIX"),
+    provider: MarketDataProvider = Depends(get_market_data_provider),
+):
+    """Batch quotes for a ticker/index list (ticker strip, market overview).
+    Each symbol is fetched independently; a failure is reported as
+    status="unavailable" for that symbol only - the batch never fails as a
+    whole, and no value is fabricated."""
+    seen: set[str] = set()
+    results: list[QuoteResult] = []
+    for raw in symbols.split(","):
+        sym = raw.strip().upper()
+        if not sym or sym in seen:
+            continue
+        seen.add(sym)
+        if len(seen) > _MAX_BATCH_SYMBOLS:
+            break
+        try:
+            q = provider.get_quote(sym)
+            change = change_pct = None
+            if q.price is not None and q.previous_close:
+                change = q.price - q.previous_close
+                change_pct = (change / q.previous_close) * 100.0
+            results.append(
+                QuoteResult(
+                    symbol=sym, status="ok", price=q.price,
+                    previous_close=q.previous_close, change=change,
+                    change_pct=change_pct, as_of=q.as_of,
+                )
+            )
+        except MarketDataError as exc:
+            results.append(QuoteResult(symbol=sym, status="unavailable", detail=str(exc)))
+    return results
+
+
 @router.get("/ohlcv/{symbol}", response_model=list[OHLCVBar])
 def get_ohlcv(
     symbol: str,
@@ -45,6 +120,39 @@ def get_ohlcv(
         return provider.get_ohlcv(symbol, start=dt.date.today() - dt.timedelta(days=days))
     except MarketDataError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/sectors", response_model=list[SectorPerformance])
+def get_sectors(provider: MarketDataProvider = Depends(get_market_data_provider)):
+    """Deterministic sector performance across the SPDR sector ETFs: 1-day and
+    1-week change and relative strength vs SPY, computed from real OHLCV. A
+    sector whose ETF can't be fetched is reported unavailable (no fabrication)."""
+    start = dt.date.today() - dt.timedelta(days=20)
+
+    # SPY weekly change as the relative-strength baseline (best-effort).
+    spy_weekly: float | None = None
+    try:
+        spy_weekly = _pct_change(provider.get_ohlcv("SPY", start=start), _WEEK_SESSIONS)
+    except MarketDataError:
+        spy_weekly = None
+
+    results: list[SectorPerformance] = []
+    for sector, symbol in _SECTOR_ETFS:
+        try:
+            bars = provider.get_ohlcv(symbol, start=start)
+        except MarketDataError:
+            results.append(SectorPerformance(sector=sector, symbol=symbol, status="unavailable"))
+            continue
+        weekly = _pct_change(bars, _WEEK_SESSIONS)
+        rel = weekly - spy_weekly if (weekly is not None and spy_weekly is not None) else None
+        results.append(
+            SectorPerformance(
+                sector=sector, symbol=symbol, status="ok",
+                daily_pct=_pct_change(bars, 1), weekly_pct=weekly,
+                rel_strength_vs_spy=rel, as_of=bars[-1].date if bars else None,
+            )
+        )
+    return results
 
 
 @router.get("/fundamentals/{symbol}", response_model=FundamentalsSnapshot)

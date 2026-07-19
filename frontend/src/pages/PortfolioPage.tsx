@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, BookOpen, Loader2 } from "lucide-react";
-import { ApiError, getAccount, getPositions, type AccountInfo, type Position } from "../lib/api";
+import {
+  ApiError,
+  getAccount,
+  getFundamentals,
+  getPositions,
+  type AccountInfo,
+  type Position,
+} from "../lib/api";
 import SectionCard from "../components/SectionCard";
 import StatTile from "../components/StatTile";
-import DemoBadge from "../components/DemoBadge";
 import NextAction from "../components/NextAction";
 import WorkflowBar from "../components/trade/WorkflowBar";
 import type { PageId } from "../types/nav";
@@ -45,6 +51,48 @@ export default function PortfolioPage({
       })
       .finally(() => setLoading(false));
   }, []);
+
+  // Real sector exposure from holdings: sector comes from provider
+  // fundamentals, weighted by each position's market value. null = loading,
+  // [] = attempted but no sector data (rendered as "Insufficient data").
+  const [sectorExposure, setSectorExposure] = useState<{ sector: string; pct: number }[] | null>(
+    null
+  );
+  useEffect(() => {
+    if (positions.length === 0) {
+      setSectorExposure(null);
+      return;
+    }
+    let alive = true;
+    const total = positions.reduce((s, p) => s + Math.abs(Number(p.market_value) || 0), 0);
+    Promise.allSettled(positions.map((p) => getFundamentals(p.symbol)))
+      .then((results) => {
+        if (!alive) return;
+        const bySector = new Map<string, number>();
+        results.forEach((r, i) => {
+          const mv = Math.abs(Number(positions[i].market_value) || 0);
+          const sector = r.status === "fulfilled" && r.value.sector ? r.value.sector : "Unknown";
+          bySector.set(sector, (bySector.get(sector) ?? 0) + mv);
+        });
+        setSectorExposure(
+          [...bySector.entries()]
+            .map(([sector, mv]) => ({ sector, pct: total ? (mv / total) * 100 : 0 }))
+            .sort((a, b) => b.pct - a.pct)
+        );
+      })
+      .catch(() => {
+        if (alive) setSectorExposure([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [positions]);
+
+  const concentrationPct = useMemo(() => {
+    const values = positions.map((p) => Math.abs(Number(p.market_value) || 0));
+    const total = values.reduce((s, v) => s + v, 0);
+    return total ? (Math.max(...values) / total) * 100 : 0;
+  }, [positions]);
 
   const totals = useMemo(() => {
     const equity = account ? Number(account.equity) : 0;
@@ -201,20 +249,50 @@ export default function PortfolioPage({
 
       <SectionCard
         title="Portfolio Intelligence"
-        description="Illustrative - requires the analytical engine (sector/beta/correlation data) that isn't built yet"
-        action={<DemoBadge />}
+        description="Sector exposure and concentration computed from your actual holdings"
       >
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatTile label="Technology exposure" value="62%" />
-          <StatTile label="AI exposure" value="41%" />
-          <StatTile label="Concentration risk" value="High" tone="critical" />
-          <StatTile label="Portfolio beta" value="1.34" />
-          <StatTile label="Avg. pairwise correlation" value="0.58" />
-          <StatTile label="Est. annualized volatility" value="28.4%" />
-        </div>
-        <p className="mt-3 text-sm text-ink-secondary">
-          Your portfolio is heavily concentrated in large-cap technology.
-        </p>
+        {positions.length === 0 ? (
+          <p className="text-sm text-ink-muted">Insufficient data — no positions to analyze.</p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <StatTile label="Holdings" value={String(positions.length)} />
+              <StatTile
+                label="Largest position"
+                value={`${concentrationPct.toFixed(0)}%`}
+                tone={concentrationPct >= 40 ? "critical" : undefined}
+              />
+              <StatTile label="Invested" value={money(totals.invested)} />
+            </div>
+
+            {sectorExposure === null ? (
+              <p className="mt-3 text-sm text-ink-muted">Loading sector exposure…</p>
+            ) : sectorExposure.length === 0 ? (
+              <p className="mt-3 text-sm text-ink-muted">Sector data unavailable for these holdings.</p>
+            ) : (
+              <div className="mt-3 space-y-2">
+                {sectorExposure.map((s) => (
+                  <div key={s.sector}>
+                    <div className="flex justify-between text-xs text-ink-secondary">
+                      <span>{s.sector}</span>
+                      <span className="tabular-nums">{s.pct.toFixed(0)}%</span>
+                    </div>
+                    <div className="mt-0.5 h-1.5 overflow-hidden rounded bg-surface-2">
+                      <div
+                        className="h-full rounded bg-brand-blue"
+                        style={{ width: `${Math.min(100, s.pct)}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="mt-3 text-[11px] text-ink-muted">
+              Sector from provider fundamentals, weighted by market value. Beta, correlation, and
+              volatility require a risk engine that isn't built yet.
+            </p>
+          </>
+        )}
       </SectionCard>
     </div>
   );

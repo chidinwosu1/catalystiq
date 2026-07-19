@@ -11,6 +11,7 @@ import {
 import SectionCard from "../components/SectionCard";
 import StatTile from "../components/StatTile";
 import StrategyOverview from "../components/StrategyOverview";
+import RuleBasedOpportunityScore from "../components/RuleBasedOpportunityScore";
 import { getDemoAnalysis } from "../mockAnalysisDetail";
 import BehavioralAnalysisTable from "../components/BehavioralAnalysisTable";
 import WorkflowBar from "../components/trade/WorkflowBar";
@@ -293,6 +294,8 @@ export default function AnalysisJournalPage({
       )}
 
       <StrategyOverview detail={detail} livePrice={quote?.price ?? null} onTrade={onTrade} />
+
+      <RuleBasedOpportunityScore symbol={symbol} />
 
       <SectionCard
         title="Technical Indicators"

@@ -332,6 +332,38 @@ export function getQuote(symbol: string): Promise<Quote> {
   return request(`/market-data/quote/${encodeURIComponent(symbol)}`);
 }
 
+export interface QuoteResult {
+  symbol: string;
+  status: "ok" | "unavailable";
+  price: number | null;
+  previous_close: number | null;
+  change: number | null;
+  change_pct: number | null;
+  as_of: string | null;
+  detail: string | null;
+}
+
+/** Batch quotes for a symbol/index list (ticker strip, market overview). A
+ *  per-symbol failure comes back as status:"unavailable", never fabricated. */
+export function getQuotes(symbols: string[]): Promise<QuoteResult[]> {
+  return request(`/market-data/quotes?symbols=${encodeURIComponent(symbols.join(","))}`);
+}
+
+export interface SectorPerformance {
+  sector: string;
+  symbol: string;
+  status: "ok" | "unavailable";
+  daily_pct: number | null;
+  weekly_pct: number | null;
+  rel_strength_vs_spy: number | null;
+  as_of: string | null;
+}
+
+/** Deterministic sector performance (SPDR sector ETFs, computed from real OHLCV). */
+export function getSectors(): Promise<SectorPerformance[]> {
+  return request("/market-data/sectors");
+}
+
 export function getOhlcv(symbol: string, days = 365): Promise<OHLCVBar[]> {
   return request(`/market-data/ohlcv/${encodeURIComponent(symbol)}?days=${days}`);
 }
@@ -348,6 +380,65 @@ export function getFundamentals(symbol: string): Promise<FundamentalsSnapshot> {
 
 export function getTechnicalSnapshot(symbol: string, days = 365 * 5): Promise<TechnicalSnapshot> {
   return request(`/analysis/technical/${encodeURIComponent(symbol)}?days=${days}`);
+}
+
+// --- Rule-Based Opportunity Score (Setup Strength) ---------------------
+// A transparent, deterministic technical setup-strength score. NOT a
+// probability of profit, AI confidence, or ML prediction. The `ml` block is
+// always present and not_available until validated models exist.
+
+export interface OpportunityFactor {
+  name: string;
+  score: number | null;
+  max_score: number;
+  status: "available" | "insufficient_data";
+  inputs: Record<string, unknown>;
+  explanation: string;
+  formula_version: string;
+}
+
+export interface OpportunityUnavailableFactor {
+  name: string;
+  reason: string;
+}
+
+export interface OpportunityScore {
+  symbol: string;
+  status: "available" | "insufficient_data";
+  score_type: string; // "rule_based"
+  score: number | null;
+  max_score: number;
+  label: string | null;
+  formula_version: string;
+  calculated_at: string;
+  data_as_of: string | null;
+  freshness: string;
+  factor_coverage: string;
+  factors: OpportunityFactor[];
+  unavailable_factors: OpportunityUnavailableFactor[];
+  warnings: string[];
+  ml: { status: string; reason: string };
+  reason: string | null;
+}
+
+export function getOpportunityScore(symbol: string): Promise<OpportunityScore> {
+  return request(`/analysis/${encodeURIComponent(symbol)}/opportunity-score`);
+}
+
+export interface OpportunityScan {
+  as_of: string;
+  formula_version: string;
+  universe_size: number;
+  eligible_count: number;
+  top: number;
+  candidates: OpportunityScore[];
+  ml: { status: string; reason: string };
+  note: string | null;
+}
+
+/** Ranked rule-based candidates from a curated universe scan (top N). */
+export function getOpportunityScan(top = 4): Promise<OpportunityScan> {
+  return request(`/analysis/opportunity-scan?top=${top}`);
 }
 
 export function getAccount(): Promise<AccountInfo> {
