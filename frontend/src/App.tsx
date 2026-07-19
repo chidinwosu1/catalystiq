@@ -8,6 +8,7 @@ import TradeTicketPage from "./pages/TradeTicketPage";
 import PortfolioPage from "./pages/PortfolioPage";
 import MarketIntelligencePage from "./pages/MarketIntelligencePage";
 import AnalysisJournalPage from "./pages/AnalysisJournalPage";
+import DataSourcesPage from "./pages/DataSourcesPage";
 import { getSession, logout } from "./lib/api";
 import type { PageId } from "./types/nav";
 
@@ -94,6 +95,7 @@ function App() {
             onNavigate={setActivePage}
           />
         )}
+        {activePage === "data-sources" && <DataSourcesPage />}
       </main>
 
       <footer className="border-t border-border">

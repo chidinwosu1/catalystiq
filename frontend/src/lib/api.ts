@@ -252,6 +252,31 @@ export function logout(): Promise<{ ok: boolean }> {
   return request("/auth/logout", { method: "POST" });
 }
 
+// --- Data sources (health / admin) -------------------------------------
+
+export interface DataSourceSummary {
+  name: string;
+  domain: string;
+  implemented: boolean;
+  enabled: boolean;
+  configured: boolean;
+  requires_api_key: boolean;
+  license: string;
+}
+
+export interface DataSourceHealth extends DataSourceSummary {
+  missing_settings: string[];
+  last_successful_ingestion_at: string | null;
+  last_failure_category: string | null;
+  last_failure_at: string | null;
+  circuit_breaker: string;
+  data_freshness_at: string | null;
+}
+
+export function getDataSourcesHealth(): Promise<DataSourceHealth[]> {
+  return request("/data-sources/health");
+}
+
 export function getQuote(symbol: string): Promise<Quote> {
   return request(`/market-data/quote/${encodeURIComponent(symbol)}`);
 }

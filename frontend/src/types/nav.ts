@@ -1,4 +1,4 @@
-export type PageId = "home" | "trade" | "portfolio" | "markets" | "analysis";
+export type PageId = "home" | "trade" | "portfolio" | "markets" | "analysis" | "data-sources";
 
 export interface PageDescriptor {
   id: PageId;
@@ -36,5 +36,11 @@ export const PAGES: PageDescriptor[] = [
     label: "Analysis",
     description:
       "Research a ticker, log your trades, and review your own performance over time.",
+  },
+  {
+    id: "data-sources",
+    label: "Data Sources",
+    description:
+      "Health of every integrated data source - enabled/configured state, last ingestion, failures, and freshness.",
   },
 ];
