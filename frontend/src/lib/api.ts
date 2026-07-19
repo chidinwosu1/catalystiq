@@ -1,12 +1,11 @@
 /**
- * Client for the Phase 1 backend (catalystiq/routers/market_data.py).
+ * Client for the Catalyst IQ backend.
  *
- * DEV-ONLY AUTH WARNING: the backend's action endpoints take a single
- * static bearer token (ACTION_API_KEY). Reading it from VITE_ACTION_API_KEY
- * bakes it into the browser bundle, which is fine for local development but
- * is not a real auth model - a shipped build must not do this. Before any
- * real deployment this needs a proper session/BFF layer in front of the API
- * so the raw action key never reaches the browser.
+ * AUTH: the primary auth is a server-side session cookie (httpOnly), set by
+ * POST /auth/login and sent automatically via `credentials: "include"` - the
+ * raw secret never lives in this bundle. A static bearer token is attached
+ * ONLY if VITE_ACTION_API_KEY is explicitly provided (for local/programmatic
+ * use); production builds should leave it unset and rely on the cookie.
  */
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -197,14 +196,17 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = { ...(init?.headers as Record<string, string>) };
+  // The session cookie (credentials: "include") is the primary auth; a bearer
+  // is attached only when a dev key is explicitly configured.
+  if (ACTION_API_KEY) headers.Authorization = `Bearer ${ACTION_API_KEY}`;
+
   let response: Response;
   try {
     response = await fetch(`${BASE_URL}${path}`, {
       ...init,
-      headers: {
-        Authorization: `Bearer ${ACTION_API_KEY}`,
-        ...init?.headers,
-      },
+      credentials: "include",
+      headers,
     });
   } catch {
     throw new ApiError(0, `Could not reach the API at ${BASE_URL}. Is the backend running?`);
@@ -222,6 +224,32 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+// --- Auth (session cookie) ---------------------------------------------
+
+export interface SessionStatus {
+  authenticated: boolean;
+  expires_at: string | null;
+}
+
+/** Whether the current browser session is authenticated. */
+export function getSession(): Promise<SessionStatus> {
+  return request("/auth/session");
+}
+
+/** Exchange a password for an httpOnly session cookie. */
+export function login(password: string): Promise<SessionStatus> {
+  return request("/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+}
+
+/** Clear the session cookie. */
+export function logout(): Promise<{ ok: boolean }> {
+  return request("/auth/logout", { method: "POST" });
 }
 
 export function getQuote(symbol: string): Promise<Quote> {

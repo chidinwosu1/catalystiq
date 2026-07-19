@@ -10,6 +10,7 @@ from catalystiq.db.base import SessionLocal
 from catalystiq.providers.broker import BrokerError
 from catalystiq.routers import (
     analysis,
+    auth,
     broker,
     calendar,
     data_quality,
@@ -55,10 +56,15 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in get_settings().cors_allow_origins.split(",") if o.strip()],
+    # Credentials must be allowed so the browser sends/receives the session
+    # cookie cross-origin (dev: Vite :5173 -> API :8000). Requires explicit
+    # origins above, never "*".
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(broker.router)
 app.include_router(market_data.router)
 app.include_router(analysis.router)

@@ -7,8 +7,31 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # Auth for the paper-trading action endpoints.
+    # Auth for the action endpoints. `action_api_key` is the programmatic
+    # bearer token (server-to-server, CI, cron). Browsers use a session
+    # cookie instead (see catalystiq/routers/auth.py) so the raw key never
+    # reaches the browser bundle.
     action_api_key: str = ""
+
+    # Session-cookie auth. The login password and the cookie-signing secret
+    # both default to action_api_key, so a single configured secret works
+    # out of the box; set them explicitly to separate concerns.
+    app_password: str = ""
+    session_secret: str = ""
+    session_ttl_seconds: int = 60 * 60 * 12  # 12 hours
+    session_cookie_name: str = "ciq_session"
+    # Secure=True means the cookie is only sent over HTTPS. Keep True in
+    # production; set False only for local HTTP development.
+    session_cookie_secure: bool = True
+    session_cookie_samesite: str = "lax"
+
+    @property
+    def effective_session_secret(self) -> str:
+        return self.session_secret or self.action_api_key
+
+    @property
+    def effective_app_password(self) -> str:
+        return self.app_password or self.action_api_key
 
     # Which BrokerProvider to use. Webull is the only supported, active
     # broker - see catalystiq/providers/broker.py's get_broker_provider(),
