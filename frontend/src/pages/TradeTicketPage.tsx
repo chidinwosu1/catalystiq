@@ -417,7 +417,7 @@ export default function TradeTicketPage({
 
   return (
     <div className="mx-auto max-w-2xl space-y-5">
-      <WorkflowBar current={4} onNavigate={onNavigate} />
+      <WorkflowBar current={3} onNavigate={onNavigate} />
       <NextAction
         step="Next step · Monitor your position"
         prompt="Order placed? Track fills, live P/L, and risk alerts in your portfolio."

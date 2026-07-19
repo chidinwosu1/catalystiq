@@ -98,11 +98,7 @@ function App() {
           />
         )}
         {activePage === "markets" && (
-          <MarketIntelligencePage
-            onTrade={goToTicket}
-            onViewAnalysis={goToAnalysis}
-            onNavigate={setActivePage}
-          />
+          <MarketIntelligencePage onTrade={goToTicket} onViewAnalysis={goToAnalysis} />
         )}
         {activePage === "analysis" && (
           <AnalysisJournalPage

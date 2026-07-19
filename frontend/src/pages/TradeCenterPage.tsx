@@ -18,12 +18,11 @@ interface TradeCenterPageProps {
   onNavigate: (page: PageId) => void;
 }
 
-type SortKey = "catalyst" | "pop" | "risk";
+type SortKey = "pop" | "risk";
 type RiskFilter = "all" | "Low" | "Moderate";
 
 const RISK_ORDER: Record<RiskLevel, number> = { Low: 0, Moderate: 1, Elevated: 2, High: 3 };
 const SORTS: { key: SortKey; label: string }[] = [
-  { key: "catalyst", label: "Catalyst score" },
   { key: "pop", label: "Prob. of profit" },
   { key: "risk", label: "Lowest risk" },
 ];
@@ -129,7 +128,7 @@ export default function TradeCenterPage({
   onViewAnalysis,
   onNavigate,
 }: TradeCenterPageProps) {
-  const [sortKey, setSortKey] = useState<SortKey>("catalyst");
+  const [sortKey, setSortKey] = useState<SortKey>("pop");
   const [filter, setFilter] = useState<RiskFilter>("all");
   const [showAll, setShowAll] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
@@ -143,7 +142,6 @@ export default function TradeCenterPage({
   const sorted = useMemo(() => {
     const list = opportunities.filter((o) => filter === "all" || o.risk === filter);
     return [...list].sort((a, b) => {
-      if (sortKey === "catalyst") return b.catalystScore - a.catalystScore;
       if (sortKey === "pop") return b.probabilityOfProfit - a.probabilityOfProfit;
       return RISK_ORDER[a.risk] - RISK_ORDER[b.risk] || b.catalystScore - a.catalystScore;
     });
@@ -166,7 +164,7 @@ export default function TradeCenterPage({
 
   return (
     <div>
-      <WorkflowBar current={2} onNavigate={onNavigate} />
+      <WorkflowBar current={1} onNavigate={onNavigate} />
 
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
@@ -177,8 +175,8 @@ export default function TradeCenterPage({
             Highest-conviction opportunities
           </h1>
           <p className="mt-1 max-w-[60ch] text-[14.5px] text-ink-secondary">
-            The model's strongest setups right now, ranked by catalyst score. Review any one for the
-            full thesis — the list stays right where you left it.
+            The model's strongest setups right now, matched to your preferences. Review any one for
+            the full thesis — the list stays right where you left it.
           </p>
         </div>
         <div className="flex items-center gap-3">
