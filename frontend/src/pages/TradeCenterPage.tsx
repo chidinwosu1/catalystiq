@@ -3,7 +3,7 @@ import { AlertTriangle, Info, Loader2 } from "lucide-react";
 import WorkflowBar from "../components/trade/WorkflowBar";
 import {
   ApiError,
-  getOpportunityScan,
+  getOpportunityScanShared,
   getQuotes,
   type OpportunityScore,
 } from "../lib/api";
@@ -119,7 +119,7 @@ export default function TradeCenterPage({
     let alive = true;
     setLoading(true);
     setError(null);
-    getOpportunityScan(4)
+    getOpportunityScanShared(4)
       .then((scan) => {
         if (!alive) return;
         setCandidates(scan.candidates);

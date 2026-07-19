@@ -33,6 +33,12 @@ import SectionCard from "../components/SectionCard";
 import NextAction from "../components/NextAction";
 import WorkflowBar from "../components/trade/WorkflowBar";
 import type { PageId } from "../types/nav";
+import {
+  canReviewOrder,
+  estimatedValue as computeEstimatedValue,
+  formatQuoteAsOf,
+  referencePrice as computeReferencePrice,
+} from "../lib/tradeTicket";
 
 interface TradeTicketPageProps {
   initialSymbol: string;
@@ -205,30 +211,47 @@ export default function TradeTicketPage({
     if (!symbol) {
       setQuote(null);
       setFundamentals(null);
+      setQuoteError(null);
       return;
     }
+    const controller = new AbortController();
     let cancelled = false;
+
+    // Quote and fundamentals are INDEPENDENT calls. A fundamentals failure
+    // (e.g. a Yahoo rate-limit) must never prevent the executable price/quote
+    // from loading, and vice-versa. Switching symbol clears the prior symbol's
+    // data so a stale quote is never shown against the new ticker.
+    setQuote(null);
+    setFundamentals(null);
     setQuoteLoading(true);
     setQuoteError(null);
 
-    Promise.all([getQuote(symbol), getFundamentals(symbol)])
-      .then(([q, f]) => {
-        if (cancelled) return;
-        setQuote(q);
-        setFundamentals(f);
+    getQuote(symbol, controller.signal)
+      .then((q) => {
+        if (!cancelled) setQuote(q);
       })
       .catch((error: unknown) => {
-        if (cancelled) return;
+        if (cancelled || controller.signal.aborted) return;
         setQuote(null);
-        setFundamentals(null);
         setQuoteError(error instanceof ApiError ? error : new ApiError(0, "Unexpected error."));
       })
       .finally(() => {
         if (!cancelled) setQuoteLoading(false);
       });
 
+    getFundamentals(symbol, controller.signal)
+      .then((f) => {
+        if (!cancelled) setFundamentals(f);
+      })
+      .catch(() => {
+        // Non-fatal: the company name just won't show. Never blocks the quote
+        // or the order-value estimate.
+        if (!cancelled) setFundamentals(null);
+      });
+
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [symbol]);
 
@@ -250,15 +273,18 @@ export default function TradeTicketPage({
     [positions, symbol]
   );
 
-  const referencePrice = useMemo(() => {
-    if (orderType === "limit" || orderType === "stop_limit") {
-      return parseFloat(limitPrice) || quote?.price || 0;
-    }
-    return quote?.price ?? 0;
-  }, [orderType, limitPrice, quote]);
+  // Reference price is null (NOT 0) when no usable, fresh quote is available;
+  // recomputed as quantity, limit price, quote, or the freshness clock change,
+  // so the estimate always reflects the LATEST valid inputs - never a value
+  // frozen at initial ticker load.
+  const referencePrice = useMemo(
+    () => computeReferencePrice({ orderType, limitPrice, quote, nowMs: nowTick }),
+    [orderType, limitPrice, quote, nowTick]
+  );
 
   const qtyNum = parseFloat(qty) || 0;
-  const estimatedValue = qtyNum * referencePrice;
+  const priceAvailable = referencePrice !== null;
+  const estimatedValue = computeEstimatedValue(qtyNum, referencePrice);
 
   const takeProfitPrice = useMemo(() => {
     const pct = parseFloat(takeProfitPct);
@@ -388,15 +414,21 @@ export default function TradeTicketPage({
   const scheduledDate = executionMode === "scheduled" && scheduledAt ? new Date(scheduledAt) : null;
   const scheduledValid = scheduledDate !== null && scheduledDate.getTime() > Date.now();
 
-  const canReview =
-    symbol.length > 0 &&
-    qtyNum > 0 &&
-    assetType === "stocks" &&
-    (orderType !== "limit" || parseFloat(limitPrice) > 0) &&
-    (orderType !== "stop" || parseFloat(stopPrice) > 0) &&
-    (orderType !== "stop_limit" || (parseFloat(limitPrice) > 0 && parseFloat(stopPrice) > 0)) &&
-    (orderType !== "trailing_stop" || parseFloat(trailPercent) > 0) &&
-    (executionMode !== "scheduled" || scheduledValid);
+  // Review/submission is blocked whenever a required price is unavailable
+  // (refPrice === null), so an order is never reviewed against an unknown or
+  // stale price.
+  const canReview = canReviewOrder({
+    symbol,
+    qtyNum,
+    assetType,
+    orderType,
+    limitPrice,
+    stopPrice,
+    trailPercent,
+    executionMode,
+    scheduledValid,
+    refPrice: referencePrice,
+  });
 
   const priceChangePct =
     quote && quote.previous_close
@@ -554,8 +586,16 @@ export default function TradeTicketPage({
                   {priceChangePct.toFixed(2)}%
                 </p>
               )}
+              {formatQuoteAsOf(quote.as_of) && (
+                <p className="mt-0.5 text-[11px] text-ink-muted">As of {formatQuoteAsOf(quote.as_of)}</p>
+              )}
             </div>
           </div>
+        )}
+        {!quoteLoading && !quoteError && !priceAvailable && quote === null && symbol && (
+          <p className="mt-3 text-xs text-status-warning">
+            Price unavailable — order estimate cannot be calculated and review is disabled.
+          </p>
         )}
       </SectionCard>
 
@@ -603,13 +643,19 @@ export default function TradeTicketPage({
         </label>
 
         <div className="mt-4 space-y-1.5 rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-sm">
-          <div className="flex justify-between">
+          <div className="flex justify-between gap-3">
             <span className="text-ink-secondary">Estimated order value</span>
-            <span className="font-semibold text-ink-primary">
-              {qtyNum || 0} × {money(referencePrice)} = {money(estimatedValue)}
-            </span>
+            {estimatedValue !== null ? (
+              <span className="font-semibold text-ink-primary">
+                {qtyNum || 0} × {money(referencePrice as number)} = {money(estimatedValue)}
+              </span>
+            ) : (
+              <span className="text-right font-medium text-status-warning">
+                Price unavailable — estimate cannot be calculated
+              </span>
+            )}
           </div>
-          {account && (
+          {account && estimatedValue !== null && (
             <div className="flex justify-between text-xs text-ink-muted">
               <span>Estimated buying power remaining</span>
               <span>
@@ -860,8 +906,11 @@ export default function TradeTicketPage({
                 label="Time in force"
                 value={TIF_OPTIONS.find((t) => t.id === timeInForce)?.label ?? timeInForce}
               />
-              <Row label="Estimated value" value={money(estimatedValue)} />
-              {account && (
+              <Row
+                label="Estimated value"
+                value={estimatedValue !== null ? money(estimatedValue) : "Price unavailable"}
+              />
+              {account && estimatedValue !== null && (
                 <Row
                   label="Buying power after"
                   value={money(
@@ -960,7 +1009,10 @@ export default function TradeTicketPage({
             {confirmation.review.stop_price != null && (
               <Row label="Stop price" value={money(confirmation.review.stop_price)} />
             )}
-            <Row label="Estimated value" value={money(estimatedValue)} />
+            <Row
+              label="Estimated value"
+              value={estimatedValue !== null ? money(estimatedValue) : "Price unavailable"}
+            />
             <Row
               label="Estimated max loss"
               value={
@@ -1025,7 +1077,9 @@ export default function TradeTicketPage({
             {ORDER_TYPES.find((t) => t.id === orderType)?.label} order ·{" "}
             {TIF_OPTIONS.find((t) => t.id === timeInForce)?.label} · account {accountId}
           </p>
-          <p className="mt-1 text-sm text-ink-secondary">Estimated value: {money(estimatedValue)}</p>
+          <p className="mt-1 text-sm text-ink-secondary">
+            Estimated value: {estimatedValue !== null ? money(estimatedValue) : "Price unavailable"}
+          </p>
           <p className="mt-1 flex items-center gap-1.5 text-sm text-ink-secondary">
             <Clock size={13} />
             {scheduledDate && `Becomes due for review at ${scheduledDate.toLocaleString()}`}

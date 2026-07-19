@@ -199,8 +199,10 @@ def test_scan_ranks_eligible_and_never_mock_fills(client, test_db_session):
     from catalystiq.schemas.market_data import FundamentalsSnapshot, Quote
 
     today = dt.date.today()
-    # AAA rises fastest (best setup), BBB slower, BAD has no data (skipped).
-    trends = {"AAA": 0.30, "BBB": 0.10, "SPY": 0.10}
+    # NVDA rises fastest (best setup), AAPL slower, BAD has no data (skipped).
+    # NVDA/AAPL both carry a governed sector (Technology -> XLK), so the scan
+    # resolves sector WITHOUT any per-symbol fundamentals call.
+    trends = {"NVDA": 0.30, "AAPL": 0.10, "SPY": 0.10}
 
     class _FakeProvider:
         def get_ohlcv(self, symbol, start, end=None, interval="1d"):
@@ -215,15 +217,15 @@ def test_scan_ranks_eligible_and_never_mock_fills(client, test_db_session):
                          as_of=dt.datetime.now(dt.timezone.utc))
 
         def get_fundamentals(self, symbol):
-            return FundamentalsSnapshot(symbol=symbol.upper(), sector="Technology",
-                                        as_of=dt.datetime.now(dt.timezone.utc))
+            # The scan must never call this - sector comes from governed data.
+            raise AssertionError("scan must not fetch fundamentals")
 
         def get_news(self, symbol, limit=10):
             return []
 
     app.dependency_overrides[get_market_data_provider] = lambda: _FakeProvider()
     try:
-        r = client.get("/analysis/opportunity-scan", params={"top": 4, "symbols": "AAA,BBB,BAD"})
+        r = client.get("/analysis/opportunity-scan", params={"top": 4, "symbols": "NVDA,AAPL,BAD"})
     finally:
         del app.dependency_overrides[get_market_data_provider]
     assert r.status_code == 200
@@ -232,7 +234,7 @@ def test_scan_ranks_eligible_and_never_mock_fills(client, test_db_session):
     # BAD is skipped (unfetchable), not mock-filled.
     syms = [c["symbol"] for c in body["candidates"]]
     assert "BAD" not in syms
-    assert set(syms) <= {"AAA", "BBB"}
+    assert set(syms) <= {"NVDA", "AAPL"}
     # Ranked by score descending.
     scores = [c["score"] for c in body["candidates"]]
     assert scores == sorted(scores, reverse=True)
