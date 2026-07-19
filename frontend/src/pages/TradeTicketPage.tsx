@@ -415,8 +415,20 @@ export default function TradeTicketPage({
   const tokenExpired = confirmation !== null && tokenMsRemaining <= 0;
   const isSubmissionDisabled = submitError?.status === 403;
 
+  // Any of these open the confirmation modal overlay.
+  const modalOpen = Boolean(confirmation || reviewing || submitResult || scheduledResult);
+
+  // Dismiss whatever the modal is currently showing.
+  function closeModal() {
+    setConfirmation(null);
+    setConfirmedOrder(null);
+    setReviewing(false);
+    setSubmitResult(null);
+    setScheduledResult(null);
+  }
+
   return (
-    <div className="mx-auto max-w-2xl space-y-5">
+    <div className="mx-auto max-w-5xl space-y-5">
       <WorkflowBar current={3} onNavigate={onNavigate} />
       <NextAction
         step="Next step · Monitor your position"
@@ -429,12 +441,15 @@ export default function TradeTicketPage({
       <div>
         <h1 className="text-xl font-semibold text-ink-primary">Trade Ticket</h1>
         <p className="mt-1 text-sm text-ink-secondary">
-          Review each order's exact details - including estimated max loss - then confirm to submit
-          a real paper order. Submission is disabled until explicitly enabled server-side.
+          Build your order on the left; the summary on the right stays in view. Click Review Order
+          to confirm the exact details - including estimated max loss - then submit.
         </p>
       </div>
 
-      <SectionCard title="Trade Setup">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+        {/* LEFT — the order form */}
+        <div className="space-y-5">
+          <SectionCard title="Trade Setup">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <p className="mb-1.5 text-xs text-ink-muted">Trading style</p>
@@ -795,47 +810,140 @@ export default function TradeTicketPage({
             )}
           </div>
         )}
-      </SectionCard>
-
-      {!confirmation && !reviewing && !submitResult && !scheduledResult && (
-        <div className="space-y-3">
-          {submitError && (
-            <div
-              className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs ${
-                isSubmissionDisabled
-                  ? "border-status-warning/40 bg-status-warning-soft text-status-warning"
-                  : "border-status-critical/40 bg-status-critical-soft text-status-critical"
-              }`}
-            >
-              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-              <span>{submitError.message}</span>
-            </div>
-          )}
-          <div className="flex gap-3">
-            <button
-              disabled={!canReview || reviewLoading}
-              onClick={handleReview}
-              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white transition-opacity disabled:opacity-40"
-            >
-              {reviewLoading && <Loader2 size={14} className="animate-spin" />}
-              Review Order
-            </button>
-            {symbol && (
-              <button
-                onClick={() => onViewAnalysis(symbol)}
-                className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-ink-secondary hover:text-ink-primary"
-              >
-                View Analysis
-              </button>
-            )}
-          </div>
+          </SectionCard>
         </div>
-      )}
 
-      {/* Immediate order: server-issued confirmation with reviewed details +
-          a single-use, short-lived token (§13). */}
-      {confirmation && (
-        <SectionCard title="Confirm Order">
+        {/* RIGHT — sticky order summary + primary action */}
+        <aside className="space-y-3 lg:sticky lg:top-4">
+          <SectionCard title="Order Summary">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-base font-semibold text-ink-primary">{symbol || "—"}</p>
+                {fundamentals?.long_name && (
+                  <p className="text-xs text-ink-muted">{fundamentals.long_name}</p>
+                )}
+              </div>
+              {quote && (
+                <div className="text-right">
+                  <p className="text-base font-semibold text-ink-primary">{money(quote.price)}</p>
+                  {priceChangePct !== null && (
+                    <p
+                      className={`text-xs font-medium ${
+                        priceChangePct >= 0 ? "text-status-good" : "text-status-critical"
+                      }`}
+                    >
+                      {priceChangePct >= 0 ? "+" : ""}
+                      {priceChangePct.toFixed(2)}%
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-3 space-y-1.5 rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-sm">
+              <div className="flex justify-between gap-3">
+                <span className="text-ink-secondary">Side</span>
+                <span
+                  className={`font-semibold capitalize ${
+                    side === "buy" ? "text-status-good" : "text-status-critical"
+                  }`}
+                >
+                  {side}
+                </span>
+              </div>
+              <Row label="Quantity" value={`${qtyNum || 0} shares`} />
+              <Row
+                label="Order type"
+                value={ORDER_TYPES.find((t) => t.id === orderType)?.label ?? orderType}
+              />
+              <Row
+                label="Time in force"
+                value={TIF_OPTIONS.find((t) => t.id === timeInForce)?.label ?? timeInForce}
+              />
+              <Row label="Estimated value" value={money(estimatedValue)} />
+              {account && (
+                <Row
+                  label="Buying power after"
+                  value={money(
+                    Math.max(
+                      0,
+                      Number(account.buying_power) - (side === "buy" ? estimatedValue : 0)
+                    )
+                  )}
+                />
+              )}
+              {takeProfitPrice && (
+                <div className="flex justify-between gap-3">
+                  <span className="text-ink-secondary">Take profit</span>
+                  <span className="font-medium text-status-good">{money(takeProfitPrice)}</span>
+                </div>
+              )}
+              {stopLossPrice && (
+                <div className="flex justify-between gap-3">
+                  <span className="text-ink-secondary">Stop loss</span>
+                  <span className="font-medium text-status-critical">{money(stopLossPrice)}</span>
+                </div>
+              )}
+              <Row
+                label="When"
+                value={
+                  executionMode === "scheduled"
+                    ? scheduledDate
+                      ? scheduledDate.toLocaleString()
+                      : "Not set"
+                    : "Immediately"
+                }
+              />
+            </div>
+
+            {submitError && (
+              <div
+                className={`mt-3 flex items-start gap-2 rounded-lg border px-3 py-2 text-xs ${
+                  isSubmissionDisabled
+                    ? "border-status-warning/40 bg-status-warning-soft text-status-warning"
+                    : "border-status-critical/40 bg-status-critical-soft text-status-critical"
+                }`}
+              >
+                <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                <span>{submitError.message}</span>
+              </div>
+            )}
+
+            <div className="mt-4 space-y-2">
+              <button
+                disabled={!canReview || reviewLoading}
+                onClick={handleReview}
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white transition-opacity disabled:opacity-40"
+              >
+                {reviewLoading && <Loader2 size={14} className="animate-spin" />}
+                Review Order
+              </button>
+              {symbol && (
+                <button
+                  onClick={() => onViewAnalysis(symbol)}
+                  className="w-full rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-ink-secondary hover:text-ink-primary"
+                >
+                  View Analysis
+                </button>
+              )}
+            </div>
+          </SectionCard>
+        </aside>
+      </div>
+
+      {/* Confirmation / review / result modal overlay */}
+      {modalOpen && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={closeModal}
+            aria-hidden
+          />
+          <div className="relative z-10 w-full max-w-md">
+            {/* Immediate order: server-issued confirmation with reviewed details +
+                a single-use, short-lived token (§13). */}
+            {confirmation && (
+              <SectionCard title="Confirm Order">
           <p className="text-sm font-medium text-ink-primary">
             {confirmation.review.side === "buy" ? "Buy" : "Sell"} {confirmation.review.qty ?? ""}
             {confirmation.review.notional != null
@@ -891,7 +999,7 @@ export default function TradeTicketPage({
               className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
             >
               {submitting && <Loader2 size={14} className="animate-spin" />}
-              Confirm & Submit
+              Submit Order
             </button>
             <button
               onClick={() => {
@@ -904,7 +1012,7 @@ export default function TradeTicketPage({
             </button>
           </div>
         </SectionCard>
-      )}
+            )}
 
       {/* Scheduled order: client-side review, then queue a draft (never
           auto-submitted). */}
@@ -992,6 +1100,9 @@ export default function TradeTicketPage({
             Place another order
           </button>
         </SectionCard>
+            )}
+          </div>
+        </div>
       )}
 
       {openScheduled.length > 0 && (
