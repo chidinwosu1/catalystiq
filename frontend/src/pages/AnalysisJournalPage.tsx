@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Loader2, Plus, Send } from "lucide-react";
+import { AlertTriangle, Loader2, Plus, Search, Send } from "lucide-react";
 import {
   ApiError,
   getQuote,
@@ -10,16 +10,13 @@ import {
 } from "../lib/api";
 import SectionCard from "../components/SectionCard";
 import StatTile from "../components/StatTile";
-import DemoBadge from "../components/DemoBadge";
-import RatingBadge from "../components/RatingBadge";
-import ProbabilityBar from "../components/ProbabilityBar";
-import ConfidenceMeter from "../components/ConfidenceMeter";
 import NextAction from "../components/NextAction";
-import { getDemoAnalysis, getDemoSetup } from "../mockAnalysisDetail";
+import StrategyOverview from "../components/StrategyOverview";
+import { getDemoAnalysis } from "../mockAnalysisDetail";
 import BehavioralAnalysisTable from "../components/BehavioralAnalysisTable";
-import ConvictionOpportunities from "../components/dashboard/ConvictionOpportunities";
 import WorkflowBar from "../components/trade/WorkflowBar";
 import { getStockBehavioralAnalysis } from "../mockBehavioralData";
+import { opportunities, type OpportunityDetail } from "../mockTradeCenter";
 import type { PageId } from "../types/nav";
 
 interface AnalysisJournalPageProps {
@@ -66,10 +63,6 @@ function emptyDraft(ticker: string): Omit<JournalEntry, "id"> {
     notes: "",
   };
 }
-
-// SetupSnapshot fields superseded by real, computed values in the Technical
-// Indicators section below (rsi/macd/movingAverages/volatility/volume).
-const REPLACED_SETUP_KEYS = new Set(["rsi", "macd", "movingAverages", "volatility", "volume"]);
 
 const INDICATOR_LABELS: Record<string, string> = {
   sma_20: "20-day SMA",
@@ -178,19 +171,48 @@ export default function AnalysisJournalPage({
   }, [symbol]);
 
   const demoAnalysis = useMemo(() => getDemoAnalysis(symbol), [symbol]);
-  const demoSetup = useMemo(() => getDemoSetup(symbol), [symbol]);
   const demoBehavioral = useMemo(() => getStockBehavioralAnalysis(symbol), [symbol]);
+
+  // Prefer the rich opportunity detail when the ticker is one of today's setups;
+  // otherwise synthesize a coherent strategy scaffold from the demo analysis so
+  // the page renders for any searched ticker.
+  const detail = useMemo<OpportunityDetail>(() => {
+    const found = opportunities.find((o) => o.symbol === symbol);
+    if (found) return found;
+    return {
+      symbol,
+      companyName: symbol,
+      price: quote ? money(quote.price) : "—",
+      rating: demoAnalysis.rating,
+      catalystScore: Math.round((demoAnalysis.probability.bullish + demoAnalysis.confidence) / 2),
+      confidence: demoAnalysis.confidence,
+      probabilityOfProfit: demoAnalysis.probability.bullish,
+      expectedReturn: demoAnalysis.expectedMove,
+      risk: "Moderate",
+      holdingPeriod: "2-10 days",
+      primaryCatalyst: "Coverage expanding",
+      summary: `${symbol} is being evaluated against the current market backdrop. Live price and computed technicals appear below; full catalyst and scoring coverage expands over time.`,
+      strategy:
+        "Swing long — enter near support, hold to your timeframe, and manage risk with a defined stop.",
+      technical: "See the live Technical Indicators section below for real, computed values.",
+      market:
+        "Moderately bullish regime with Technology leading; conditions are broadly constructive.",
+      riskText: `Invalidation: ${demoAnalysis.invalidation}. Size the position to your max-loss preference and honor the stop.`,
+      evidence: [
+        "Live price and computed technicals available below",
+        "Behavioral analysis included below",
+      ],
+      catalysts: ["Coverage expanding — scheduled catalysts will appear here"],
+      entry: quote ? money(quote.price) : "—",
+      target: demoAnalysis.expectedMove,
+      stop: "Per your max-loss %",
+      exit: demoAnalysis.invalidation,
+    };
+  }, [symbol, demoAnalysis, quote]);
 
   function handleSymbolSubmit(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key !== "Enter") return;
     setSymbol(symbolInput.trim().toUpperCase());
-  }
-
-  function selectSymbol(sym: string) {
-    const upper = sym.trim().toUpperCase();
-    setSymbolInput(upper);
-    setSymbol(upper);
-    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function addEntry() {
@@ -246,83 +268,32 @@ export default function AnalysisJournalPage({
   return (
     <div className="space-y-6">
       <WorkflowBar current={3} onNavigate={onNavigate} />
-      <div>
-        <h1 className="text-xl font-semibold text-ink-primary">Investment Strategy</h1>
-        <p className="mt-1 text-sm text-ink-secondary">
-          Start from today's highest-conviction opportunities, research a ticker, then log and
-          review your own trades.
-        </p>
-      </div>
 
-      <ConvictionOpportunities onReview={selectSymbol} />
-
-      <SectionCard
-        title="Stock Analysis"
-        action={<DemoBadge />}
-        description="Price and the Technical Indicators section below are real. Rating, probability, confidence, and the remaining setup fields are illustrative until the full scoring model is built."
-      >
+      <label className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink-muted focus-within:border-brand-blue/50">
+        <Search size={15} />
         <input
           type="text"
           value={symbolInput}
           onChange={(e) => setSymbolInput(e.target.value)}
           onKeyDown={handleSymbolSubmit}
-          placeholder="Search ticker, press Enter…"
-          className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-ink-primary placeholder:text-ink-muted focus:border-brand-blue/50 focus:outline-none"
+          placeholder="Research a ticker — press Enter…"
+          className="w-full bg-transparent text-ink-primary placeholder:text-ink-muted focus:outline-none"
         />
+      </label>
 
-        {quoteLoading && (
-          <div className="mt-3 flex items-center gap-2 text-sm text-ink-secondary">
-            <Loader2 size={14} className="animate-spin" /> Fetching price…
-          </div>
-        )}
-        {quoteError && (
-          <div className="mt-3 flex items-start gap-2 rounded-lg border border-status-critical/40 bg-status-critical-soft px-3 py-2 text-xs text-status-critical">
-            <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-            <span>{quoteError.message}</span>
-          </div>
-        )}
-
-        <div className="mt-4 flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-medium text-ink-primary">{symbol}</h3>
-            {quote && <p className="text-sm text-ink-secondary">{money(quote.price)} (live)</p>}
-          </div>
-          <RatingBadge rating={demoAnalysis.rating} />
+      {quoteLoading && (
+        <div className="flex items-center gap-2 text-sm text-ink-secondary">
+          <Loader2 size={14} className="animate-spin" /> Fetching price…
         </div>
-
-        <div className="mt-3">
-          <ProbabilityBar probability={demoAnalysis.probability} />
+      )}
+      {quoteError && (
+        <div className="flex items-start gap-2 rounded-lg border border-status-critical/40 bg-status-critical-soft px-3 py-2 text-xs text-status-critical">
+          <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+          <span>{quoteError.message}</span>
         </div>
-        <div className="mt-3">
-          <ConfidenceMeter confidence={demoAnalysis.confidence} />
-        </div>
+      )}
 
-        <div className="mt-4 grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
-          {Object.entries(demoSetup)
-            .filter(([key]) => !REPLACED_SETUP_KEYS.has(key))
-            .map(([key, value]) => (
-              <div key={key} className="rounded-lg border border-border px-3 py-2">
-                <p className="uppercase tracking-wide text-ink-muted">
-                  {key.replace(/([A-Z])/g, " $1")}
-                </p>
-                <p className="mt-0.5 text-ink-primary">{value}</p>
-              </div>
-            ))}
-        </div>
-
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <StatTile label="Expected move" value={demoAnalysis.expectedMove} />
-          <StatTile label="Invalidation" value={demoAnalysis.invalidation} />
-          {quote && <StatTile label="Entry reference" value={money(quote.price)} />}
-        </div>
-
-        <button
-          onClick={() => onTrade(symbol)}
-          className="mt-4 rounded-lg bg-brand-blue px-4 py-2 text-sm font-semibold text-white"
-        >
-          Trade {symbol}
-        </button>
-      </SectionCard>
+      <StrategyOverview detail={detail} livePrice={quote?.price ?? null} onTrade={onTrade} />
 
       <SectionCard
         title="Technical Indicators"
