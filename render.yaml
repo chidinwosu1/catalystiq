@@ -1,0 +1,92 @@
+# Render Blueprint for the current Catalyst IQ app.
+#
+# Creates THREE new resources - a Postgres database, the FastAPI backend, and
+# the React static frontend. It does NOT touch any existing service (the old
+# Alpaca backend is unaffected; these names are new).
+#
+# Cookie/CORS note (derived from the auth code, not guessed): the frontend and
+# API run on two DIFFERENT onrender.com subdomains. `onrender.com` is on the
+# Public Suffix List, so those subdomains are CROSS-SITE, not merely
+# cross-origin. A cross-site session cookie is only sent on the frontend's
+# API calls when it is SameSite=None + Secure - hence the values below, paired
+# with allow_credentials=True and an explicit CORS origin in the app. (Some
+# browsers restrict third-party cookies; if login doesn't persist, serve the
+# frontend from the backend or use one custom domain for both - see DEPLOY.md.)
+#
+# A few values depend on the URLs Render assigns at create time, so they are
+# `sync: false` and set by you in the dashboard (see DEPLOY.md):
+#   - backend  CORS_ALLOW_ORIGINS  -> the frontend URL
+#   - frontend VITE_API_BASE_URL   -> the backend URL
+#   - backend  APP_PASSWORD        -> your chosen login password (>= 12 chars)
+
+databases:
+  - name: catalystiq-db
+    databaseName: catalystiq
+    user: catalystiq
+    plan: free
+
+services:
+  # --- Backend API (FastAPI) ---------------------------------------------
+  - type: web
+    name: catalystiq-api
+    runtime: python
+    plan: free
+    rootDir: .
+    buildCommand: pip install -r requirements.txt
+    # Migrations run on each boot (idempotent); works on the free plan, which
+    # has no pre-deploy hook.
+    startCommand: alembic upgrade head && uvicorn catalystiq.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: ENVIRONMENT
+        value: production
+      # Your private Catalyst IQ login password. Required in production
+      # (>= 12 chars). The app refuses to start without it.
+      - key: APP_PASSWORD
+        sync: false
+      # Signs session cookies only. Render generates a strong random value;
+      # it is never shown in the repo and differs from ACTION_API_KEY.
+      - key: SESSION_SECRET
+        generateValue: true
+      # Programmatic bearer token (server-to-server/CI). Auto-generated.
+      - key: ACTION_API_KEY
+        generateValue: true
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
+      # Cross-site subdomains (see note above) -> None + Secure.
+      - key: SESSION_COOKIE_SAMESITE
+        value: "none"
+      # Set to the exact frontend URL once it exists,
+      # e.g. https://catalystiq-web.onrender.com
+      - key: CORS_ALLOW_ORIGINS
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: catalystiq-db
+          property: connectionString
+      # Order submission stays DISABLED and Webull READ-ONLY: the enable
+      # flags, order-confirmation secret, and broker credentials are
+      # intentionally left unset (secure defaults in code).
+
+  # --- Frontend (static site) --------------------------------------------
+  - type: web
+    name: catalystiq-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Set to the exact backend URL once it exists,
+      # e.g. https://catalystiq-api.onrender.com  (then redeploy so it's baked
+      # into the build). Leave VITE_ACTION_API_KEY UNSET - auth is the cookie.
+      - key: VITE_API_BASE_URL
+        sync: false
+    # SPA fallback so any path serves the app shell.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
