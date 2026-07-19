@@ -14,8 +14,17 @@ class Base(DeclarativeBase):
     pass
 
 
+def normalize_database_url(url: str) -> str:
+    """Render (and some other hosts) hand out a `postgres://` URL, but
+    SQLAlchemy 2.x only recognizes the `postgresql://` scheme (with the
+    psycopg2 driver). Normalize it so the app and Alembic both connect."""
+    if url.startswith("postgres://"):
+        return "postgresql://" + url[len("postgres://") :]
+    return url
+
+
 def make_engine(database_url: str | None = None):
-    url = database_url or get_settings().database_url
+    url = normalize_database_url(database_url or get_settings().database_url)
     connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
     return create_engine(url, connect_args=connect_args, future=True)
 

@@ -10,7 +10,7 @@ from alembic import context
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from catalystiq.config import get_settings  # noqa: E402
-from catalystiq.db.base import Base  # noqa: E402
+from catalystiq.db.base import Base, normalize_database_url  # noqa: E402
 from catalystiq.db import models  # noqa: E402,F401
 
 # this is the Alembic Config object, which provides
@@ -22,8 +22,9 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Prefer the app's DATABASE_URL env var over the static alembic.ini value.
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+# Prefer the app's DATABASE_URL env var over the static alembic.ini value
+# (normalized so a Render-style postgres:// URL works).
+config.set_main_option("sqlalchemy.url", normalize_database_url(get_settings().database_url))
 
 target_metadata = Base.metadata
 
