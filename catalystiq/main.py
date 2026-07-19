@@ -5,10 +5,21 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from catalystiq.config import get_settings
+from catalystiq.config import get_settings, validate_settings
 from catalystiq.db.base import SessionLocal
-from catalystiq.providers.broker import BrokerError, get_broker_provider
-from catalystiq.routers import analysis, broker, market_data
+from catalystiq.providers.broker import BrokerError
+from catalystiq.routers import (
+    analysis,
+    auth,
+    broker,
+    calendar,
+    data_quality,
+    data_sources,
+    fundamentals,
+    macro,
+    market_data,
+    regulatory,
+)
 from catalystiq.scheduler import scheduler_loop
 from catalystiq.validation.reference.scheduler import reference_validation_loop
 
@@ -16,8 +27,11 @@ from catalystiq.validation.reference.scheduler import reference_validation_loop
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    # Fail fast on an enabled-but-misconfigured data source (§2). Raises
+    # ConfigurationError listing offending setting names only, never values.
+    validate_settings(settings)
     tasks = [
-        asyncio.create_task(scheduler_loop(SessionLocal, get_broker_provider)),
+        asyncio.create_task(scheduler_loop(SessionLocal)),
         asyncio.create_task(
             reference_validation_loop(
                 SessionLocal,
@@ -42,13 +56,24 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in get_settings().cors_allow_origins.split(",") if o.strip()],
+    # Credentials must be allowed so the browser sends/receives the session
+    # cookie cross-origin (dev: Vite :5173 -> API :8000). Requires explicit
+    # origins above, never "*".
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(broker.router)
 app.include_router(market_data.router)
 app.include_router(analysis.router)
+app.include_router(calendar.router)
+app.include_router(macro.router)
+app.include_router(fundamentals.router)
+app.include_router(regulatory.router)
+app.include_router(data_quality.router)
+app.include_router(data_sources.router)
 
 
 @app.exception_handler(BrokerError)

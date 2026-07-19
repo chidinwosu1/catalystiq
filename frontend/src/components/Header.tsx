@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Search } from "lucide-react";
+import { LogOut, Search } from "lucide-react";
 import Logo from "./Logo";
 import { PAGES, type PageId } from "../types/nav";
 
@@ -7,9 +7,10 @@ interface HeaderProps {
   activePage: PageId;
   onNavigate: (page: PageId) => void;
   onSearch: (symbol: string) => void;
+  onSignOut?: () => void;
 }
 
-export default function Header({ activePage, onNavigate, onSearch }: HeaderProps) {
+export default function Header({ activePage, onNavigate, onSearch, onSignOut }: HeaderProps) {
   const [value, setValue] = useState("");
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -44,17 +45,29 @@ export default function Header({ activePage, onNavigate, onSearch }: HeaderProps
           ))}
         </nav>
 
-        <label className="flex w-56 items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink-muted focus-within:border-brand-blue/50">
-          <Search size={15} />
-          <input
-            type="text"
-            placeholder="Search ticker, press Enter…"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            className="w-full bg-transparent text-ink-primary placeholder:text-ink-muted focus:outline-none"
-          />
-        </label>
+        <div className="flex items-center gap-2">
+          <label className="flex w-56 items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink-muted focus-within:border-brand-blue/50">
+            <Search size={15} />
+            <input
+              type="text"
+              placeholder="Search ticker, press Enter…"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              className="w-full bg-transparent text-ink-primary placeholder:text-ink-muted focus:outline-none"
+            />
+          </label>
+          {onSignOut && (
+            <button
+              onClick={onSignOut}
+              title="Sign out"
+              aria-label="Sign out"
+              className="rounded-lg border border-border p-2 text-ink-secondary hover:text-ink-primary"
+            >
+              <LogOut size={15} />
+            </button>
+          )}
+        </div>
       </div>
 
       <nav

@@ -98,7 +98,41 @@ class ScheduledOrderRecord(BaseModel):
     symbol: str
     order: NewOrder
     scheduled_at: dt.datetime
-    status: Literal["pending", "submitted", "failed", "cancelled"]
+    # "due" = the scheduled time has passed and the order is ready for manual
+    # review/confirmation; it is NEVER submitted automatically (§13).
+    status: Literal["pending", "due", "submitted", "failed", "cancelled"]
     broker_order_id: Optional[str] = None
     error_detail: Optional[str] = None
     created_at: dt.datetime
+
+
+class OrderReview(BaseModel):
+    """The exact details a user must review before confirming an order (§13),
+    returned by the confirm endpoint alongside the single-use token."""
+
+    symbol: str
+    side: str
+    type: str
+    time_in_force: str
+    qty: Optional[float] = None
+    notional: Optional[float] = None
+    limit_price: Optional[float] = None
+    stop_price: Optional[float] = None
+    estimated_max_loss: Optional[float] = None
+    account_id: str
+    mode: str
+
+
+class OrderConfirmationResponse(BaseModel):
+    review: OrderReview
+    confirmation_token: str
+    expires_at: dt.datetime
+
+
+class ConfirmedOrder(BaseModel):
+    """Body for submitting a confirmed order (§13): the order, the account it
+    was confirmed against, and the single-use token."""
+
+    order: NewOrder
+    account_id: str
+    confirmation_token: str

@@ -130,6 +130,11 @@ catalystiq/
     base.py             # engine/session (defaults to local SQLite)
     models.py            # ORM models (§7 schema)
   providers/
+    base.py               # provider vocabulary: DataDomain, DataClassification,
+                           # IngestionStatus, ProviderError/category, adapter identity
+    registry.py            # data-driven source registry + config-gated factory
+    transport.py           # shared HTTP client: timeouts, retry+backoff+jitter,
+                            # token-bucket rate limiter, circuit breaker, secret redaction
     market_data.py       # MarketDataProvider ABC + YahooFinanceProvider
     broker.py              # BrokerProvider ABC + WebullBroker (sole active broker;
                             # AlpacaPaperBroker also lives here as a disabled legacy adapter)
@@ -215,6 +220,100 @@ not a pattern to ship.
   `POST /paper/orders`, `GET /paper/orders/{id}`, `DELETE /paper/orders/{id}`
 
 All of the above require `Authorization: Bearer <ACTION_API_KEY>`.
+
+## Data-source integration (foundation)
+
+External data always flows **Provider → Bronze → Silver → Gold**; Gold
+compute functions never call a provider directly (enforced today in
+`pipelines/market_price_pipeline.py`). The `providers/` package is the
+foundation for extending this beyond the market-price domain:
+
+- **`base.py`** — one shared vocabulary every adapter uses: `DataDomain`,
+  `DataClassification` (real-time / delayed / end-of-day / revised),
+  `IngestionStatus` (`running`/`succeeded`/`partial`/`failed`/`rate_limited`/
+  `unavailable`), `LicenseClassification`, and a normalized
+  `ProviderError` + `ProviderErrorCategory`. Adapters declare identity via
+  `PROVIDER_NAME` / `ADAPTER_VERSION` / `DOMAIN`.
+- **`registry.py`** — every planned source described as data (domain,
+  required setting *names*, enable flag, license class, base URLs,
+  `implemented`), plus `build_adapter(name)`: a single config-gated factory
+  that raises a `CONFIG`-category `ProviderError` for an unknown, disabled,
+  unconfigured, or not-yet-implemented source instead of failing obscurely.
+- **`transport.py`** — the shared HTTP client for the REST-based adapters
+  added in later phases (SEC, FRED, BLS, BEA, FINRA, Nasdaq, Twelve Data):
+  explicit connect/read timeouts, bounded retries with exponential backoff +
+  jitter, a token-bucket rate limiter, a circuit breaker, and secret
+  redaction. Fully unit-testable (clock/sleep/jitter injected) — no live
+  calls in the suite.
+
+`BronzeIngestionRun` now carries domain-agnostic ingestion fields (dataset,
+endpoint, requested identifier, response/release timestamps, HTTP status,
+record count, rate-limit info, retry count, error category, payload checksum
+/ reference, license class) so one table records ingestion for every domain.
+
+**Configuration.** Each source has an `ENABLE_*` flag and, where needed, an
+API key; a key is required only when its source is enabled *and* its adapter
+is implemented. `validate_settings()` runs at startup and raises a
+`ConfigurationError` naming any missing setting — **names only, never
+values**. See `.env.example` for the full list (placeholders only; real
+secrets belong in your local `.env` / host environment, never in git).
+
+All ten sources are implemented: **Yahoo Finance** (market data, initial
+primary), **Twelve Data** (optional secondary / validation, off by default),
+**Webull** (brokerage; read-only), **NYSE** market calendar, **FRED/ALFRED**
++ **BLS** + **BEA** (macro), **SEC EDGAR** (fundamentals), and **FINRA** +
+**Nasdaq Trader** (regulatory).
+
+**Cross-provider validation (§5, §16).** When Twelve Data is enabled, a
+comparison sample fetches the same quote from Yahoo (primary) and Twelve Data
+(secondary) and records a `provider_comparison` row: both values, their
+difference, whether it's within tolerance, and which was selected and why.
+Values are never averaged and the secondary never silently overwrites the
+primary; a difference beyond `PROVIDER_COMPARISON_TOLERANCE_PCT` is flagged.
+`POST /data-quality/market_data/compare/{symbol}`, `GET /data-quality/{domain}`.
+A configured-only Yahoo-outage fallback (`MARKET_DATA_FALLBACK_ENABLED`) is
+available; the primary is never pre-emptively replaced.
+
+**Order submission is disabled by default (§13).** Paper and live are
+separate flags with separate credentials; **live is refused until separately
+approved** (even if its flag is set). When paper submission is enabled, every
+order is a two-step flow: `POST /paper/orders/confirm` returns the exact
+details to review (symbol, side, qty/notional, type, limit/stop, **estimated
+max loss**, account) plus a **single-use, short-lived confirmation token**
+bound to those details; `POST /paper/orders` submits only with a valid token
+and consumes it — any change to the order invalidates it. The scheduled-order
+poller **never auto-submits**: it flips a due order to `due` for manual
+review. `GET /paper/connection-test` is a read-only Webull reachability check.
+
+**Health/admin surfaces (§18):** `GET /data-sources`, `/data-sources/health`,
+`/data-sources/{provider}/health` — enabled/configured state, last successful
+ingestion, last failure category, and freshness, with **setting names only,
+never secret values**.
+
+New network/document domains flow through a generic Bronze store
+(`BronzeRawDocument`) and the `pipelines/ingestion.py` helpers, then into
+normalized Silver products that all share the `SilverRecordMixin` common
+columns: `silver_market_session`, `silver_macro_series` /
+`silver_macro_observation` / `silver_economic_release`,
+`silver_security_identifier` / `silver_company_filing` /
+`silver_company_fact` / `silver_material_event`. Point-in-time is preserved:
+a macro observation's vintage window is part of its identity, so a revision
+is a new row and the originally-known value is never overwritten; likewise an
+amended SEC filing's facts are preserved alongside the originals, with the
+latest-filed value surfaced as active.
+
+Read-only endpoints: `GET /market-calendar/sessions`, `GET /macro/series/{id}`,
+`GET /macro/series/{id}/observations?as_of=&source=fred|bls`,
+`GET /macro/releases`, `GET /macro/bea?table=`, `GET /fundamentals/{symbol}`,
+`GET /filings/{symbol}`, `GET /short-interest/{symbol}`,
+`GET /short-sale-volume/{symbol}`.
+
+Phase 3 Silver products added: `silver_bea_value`, `silver_short_sale_volume`
+/ `silver_short_interest` (separate datasets; a corrected FINRA file is kept
+alongside the original via `file_version`), and `silver_security_master`
+(keyed on a stable internal security id, not the reusable ticker). BLS
+observations reuse `silver_macro_observation`, preserving BLS-specific fields
+(period code, footnotes, preliminary flag) in a `source_fields` column.
 
 ## Reference-calculation adapter
 

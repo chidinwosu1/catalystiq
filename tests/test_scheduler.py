@@ -1,9 +1,12 @@
-"""Tests for the scheduled-order background executor (catalystiq/scheduler.py)."""
+"""Tests for the scheduled-order poller (catalystiq/scheduler.py).
+
+Per §13 the poller NEVER submits an order automatically: it only flips a due
+scheduled order to `due` so the UI can surface it for manual review/
+confirmation. Submission always goes through the explicit confirm+token flow.
+"""
 import datetime as dt
-from unittest.mock import MagicMock
 
 from catalystiq.db import models
-from catalystiq.providers.broker import BrokerError, WebullBroker, get_broker_provider
 from catalystiq.scheduler import run_due_scheduled_orders
 
 
@@ -21,94 +24,38 @@ def make_row(db, *, status="pending", minutes_from_now=-5, symbol="AAPL"):
     return row
 
 
-def test_submits_due_pending_orders(test_db_session):
+def test_due_orders_are_marked_due_not_submitted(test_db_session):
     row = make_row(test_db_session, minutes_from_now=-1)
-    broker = MagicMock()
-    broker.submit_order.return_value = {"id": "order-123", "status": "accepted"}
-
-    touched = run_due_scheduled_orders(test_db_session, broker)
-
+    touched = run_due_scheduled_orders(test_db_session)
     assert len(touched) == 1
-    assert touched[0].status == "submitted"
-    assert touched[0].broker_order_id == "order-123"
-    broker.submit_order.assert_called_once()
+    # Marked ready for manual review - NOT submitted.
+    assert touched[0].status == "due"
+    assert touched[0].broker_order_id is None
 
 
 def test_ignores_future_orders(test_db_session):
     make_row(test_db_session, minutes_from_now=30)
-    broker = MagicMock()
-
-    touched = run_due_scheduled_orders(test_db_session, broker)
-
-    assert touched == []
-    broker.submit_order.assert_not_called()
+    assert run_due_scheduled_orders(test_db_session) == []
 
 
 def test_ignores_non_pending_orders(test_db_session):
     make_row(test_db_session, status="cancelled", minutes_from_now=-5)
     make_row(test_db_session, status="submitted", minutes_from_now=-5)
-    broker = MagicMock()
-
-    touched = run_due_scheduled_orders(test_db_session, broker)
-
-    assert touched == []
-    broker.submit_order.assert_not_called()
+    make_row(test_db_session, status="due", minutes_from_now=-5)
+    assert run_due_scheduled_orders(test_db_session) == []
 
 
-def test_marks_failed_on_broker_rejection(test_db_session):
-    make_row(test_db_session, minutes_from_now=-1)
-    broker = MagicMock()
-    broker.submit_order.side_effect = BrokerError("insufficient buying power")
-
-    touched = run_due_scheduled_orders(test_db_session, broker)
-
-    assert touched[0].status == "failed"
-    assert "insufficient buying power" in touched[0].error_detail
-
-
-def test_scheduled_orders_are_submitted_through_webull(test_db_session, monkeypatch):
-    """End-to-end through the real factory: the broker `run_due_scheduled_orders`
-    submits through is a genuine WebullBroker, and the order actually reaches
-    Webull's order_v3.place_order - not some other provider."""
-    from catalystiq.config import get_settings
-
-    get_settings.cache_clear()
-    monkeypatch.setenv("BROKER_PROVIDER", "webull")
-    monkeypatch.setenv("WEBULL_APP_KEY", "key")
-    monkeypatch.setenv("WEBULL_APP_SECRET", "secret")
-    monkeypatch.setenv("WEBULL_ACCOUNT_ID", "acct")
-
-    fake_trade_client = MagicMock()
-    fake_response = MagicMock(status_code=200)
-    fake_response.json.return_value = {"id": "webull-order-1", "status": "accepted"}
-    fake_trade_client.order_v3.place_order.return_value = fake_response
-    monkeypatch.setattr("webull.core.client.ApiClient", lambda *a, **k: MagicMock())
-    monkeypatch.setattr("webull.trade.trade_client.TradeClient", lambda *a: fake_trade_client)
-
-    try:
-        broker = get_broker_provider()
-        assert isinstance(broker, WebullBroker)
-
-        make_row(test_db_session, minutes_from_now=-1)
-        touched = run_due_scheduled_orders(test_db_session, broker)
-
-        assert touched[0].status == "submitted"
-        assert touched[0].broker_order_id == "webull-order-1"
-        fake_trade_client.order_v3.place_order.assert_called_once()
-    finally:
-        get_settings.cache_clear()
-
-
-def test_processes_multiple_due_orders_independently(test_db_session):
+def test_processes_multiple_due_orders(test_db_session):
     make_row(test_db_session, minutes_from_now=-1, symbol="AAPL")
     make_row(test_db_session, minutes_from_now=-2, symbol="MSFT")
-    broker = MagicMock()
-    broker.submit_order.side_effect = [
-        {"id": "1"},
-        BrokerError("rejected"),
-    ]
+    touched = run_due_scheduled_orders(test_db_session)
+    assert {row.symbol: row.status for row in touched} == {"AAPL": "due", "MSFT": "due"}
 
-    touched = run_due_scheduled_orders(test_db_session, broker)
 
-    statuses = {row.symbol: row.status for row in touched}
-    assert statuses == {"AAPL": "submitted", "MSFT": "failed"}
+def test_poller_never_calls_a_broker(test_db_session):
+    # The function no longer even accepts a broker - submission is not part of
+    # the scheduled path at all.
+    import inspect
+
+    params = set(inspect.signature(run_due_scheduled_orders).parameters)
+    assert params == {"db"}
