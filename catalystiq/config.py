@@ -7,30 +7,55 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    # Deployment environment. "production" enforces the auth-hardening rules
+    # in validate_auth_config() (explicit, distinct, secure secrets - no
+    # fallbacks). Anything else (development/test) allows the dev
+    # conveniences below. Set ENVIRONMENT=production for real deployments.
+    environment: str = "development"
+
     # Auth for the action endpoints. `action_api_key` is the programmatic
     # bearer token (server-to-server, CI, cron). Browsers use a session
     # cookie instead (see catalystiq/routers/auth.py) so the raw key never
     # reaches the browser bundle.
     action_api_key: str = ""
 
-    # Session-cookie auth. The login password and the cookie-signing secret
-    # both default to action_api_key, so a single configured secret works
-    # out of the box; set them explicitly to separate concerns.
+    # Session-cookie auth.
+    #   app_password  - the private password a user types to log into
+    #                   Catalyst IQ (verified at /auth/login).
+    #   session_secret - a SEPARATE secret used ONLY to sign session cookies;
+    #                   it is never the login password and never leaves the
+    #                   server.
+    # In development/test these fall back to action_api_key for convenience.
+    # In production there is NO fallback and NO default: both must be set
+    # explicitly, be distinct from each other and from action_api_key, meet a
+    # minimum length, and the cookie must be Secure - validate_auth_config()
+    # fails startup otherwise.
     app_password: str = ""
     session_secret: str = ""
     session_ttl_seconds: int = 60 * 60 * 12  # 12 hours
     session_cookie_name: str = "ciq_session"
-    # Secure=True means the cookie is only sent over HTTPS. Keep True in
+    # Secure=True means the cookie is only sent over HTTPS. Required in
     # production; set False only for local HTTP development.
     session_cookie_secure: bool = True
     session_cookie_samesite: str = "lax"
 
     @property
+    def is_production(self) -> bool:
+        return self.environment.strip().lower() == "production"
+
+    @property
     def effective_session_secret(self) -> str:
+        # No fallback in production - validate_auth_config() guarantees
+        # session_secret is set there, so the cookie key is never the action
+        # key or the login password.
+        if self.is_production:
+            return self.session_secret
         return self.session_secret or self.action_api_key
 
     @property
     def effective_app_password(self) -> str:
+        if self.is_production:
+            return self.app_password
         return self.app_password or self.action_api_key
 
     # Which BrokerProvider to use. Webull is the only supported, active
@@ -159,6 +184,56 @@ class ConfigurationError(RuntimeError):
     secret into logs or an API response."""
 
 
+# Minimum strengths for the production auth secrets. The session secret is a
+# signing key (should be long/random); the password is human-entered.
+MIN_APP_PASSWORD_LENGTH = 12
+MIN_SESSION_SECRET_LENGTH = 32
+
+
+def validate_auth_config(settings: "Settings") -> list[str]:
+    """Production auth-hardening checks (§ requirements 4/5). Returns a list of
+    problems (setting NAMES only, never values). Empty in non-production - the
+    dev/test fallback to action_api_key is allowed there.
+
+    In production: APP_PASSWORD and SESSION_SECRET must both be set (no
+    fallback, no default), non-blank, of minimum length, distinct from each
+    other and from ACTION_API_KEY, and the session cookie must be Secure.
+    """
+    if not settings.is_production:
+        return []
+
+    problems: list[str] = []
+    pw = settings.app_password.strip()
+    secret = settings.session_secret.strip()
+    api_key = settings.action_api_key.strip()
+
+    if not pw:
+        problems.append("APP_PASSWORD must be set explicitly in production (no default/fallback).")
+    else:
+        if len(pw) < MIN_APP_PASSWORD_LENGTH:
+            problems.append(f"APP_PASSWORD must be at least {MIN_APP_PASSWORD_LENGTH} characters.")
+        if api_key and pw == api_key:
+            problems.append("APP_PASSWORD must not fall back to / equal ACTION_API_KEY.")
+
+    if not secret:
+        problems.append("SESSION_SECRET must be set explicitly in production (no default/fallback).")
+    else:
+        if len(secret) < MIN_SESSION_SECRET_LENGTH:
+            problems.append(
+                f"SESSION_SECRET must be at least {MIN_SESSION_SECRET_LENGTH} characters."
+            )
+        if api_key and secret == api_key:
+            problems.append("SESSION_SECRET must not fall back to / equal ACTION_API_KEY.")
+
+    if pw and secret and pw == secret:
+        problems.append("APP_PASSWORD and SESSION_SECRET must be different values.")
+
+    if not settings.session_cookie_secure:
+        problems.append("SESSION_COOKIE_SECURE must be true in production.")
+
+    return problems
+
+
 def validate_settings(settings: "Settings | None" = None) -> None:
     """Fail fast if an *enabled* source is missing required configuration.
 
@@ -177,6 +252,9 @@ def validate_settings(settings: "Settings | None" = None) -> None:
 
     settings = settings or get_settings()
     problems: list[str] = []
+
+    # Auth hardening first (production fail-fast; §4/§5). Names only.
+    problems.extend(validate_auth_config(settings))
 
     for source in SOURCE_REGISTRY:
         if not is_source_enabled(source.name, settings):
@@ -208,7 +286,7 @@ def validate_settings(settings: "Settings | None" = None) -> None:
 
     if problems:
         raise ConfigurationError(
-            "Invalid data-source configuration:\n  - " + "\n  - ".join(problems)
+            "Invalid configuration:\n  - " + "\n  - ".join(problems)
         )
 
 

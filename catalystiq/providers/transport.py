@@ -46,6 +46,8 @@ _REDACT_KEYS = {
     "appsecret",
     "key",
     "password",
+    "app_password",
+    "session_secret",
     "registration_token",
     "userid",
     "account_id",

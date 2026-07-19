@@ -44,7 +44,7 @@ export default function LoginScreen({ onSuccess }: LoginScreenProps) {
           <div>
             <h1 className="text-lg font-semibold text-ink-primary">Sign in</h1>
             <p className="mt-1 text-sm text-ink-secondary">
-              Enter the workspace password to continue.
+              Enter your Catalyst IQ password.
             </p>
           </div>
         </div>
