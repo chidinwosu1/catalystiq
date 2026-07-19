@@ -9,6 +9,16 @@ the abstract Protocol, while this layer is allowed to read the database and the
 analysis engine. It imports the ML *schema* (the contract), never ML *model*
 code, and never modifies the ML contract.
 """
+from catalystiq.features.historical_dataset import (
+    HistoricalDatasetAssembler,
+    HistoricalDatasetResult,
+    trading_timestamps,
+)
 from catalystiq.features.pit_provider import SilverPitFeatureProvider
 
-__all__ = ["SilverPitFeatureProvider"]
+__all__ = [
+    "SilverPitFeatureProvider",
+    "HistoricalDatasetAssembler",
+    "HistoricalDatasetResult",
+    "trading_timestamps",
+]
