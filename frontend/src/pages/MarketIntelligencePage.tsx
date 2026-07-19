@@ -6,9 +6,9 @@ import RatingBadge from "../components/RatingBadge";
 import NextAction from "../components/NextAction";
 import BehavioralAnalysisTable from "../components/BehavioralAnalysisTable";
 import WorkflowBar from "../components/trade/WorkflowBar";
-import { catalysts, dailyWatchlist, sectorRotation } from "../mockMarketData";
+import { catalysts, dailyWatchlist } from "../mockMarketData";
 import { marketWideBehavioralAnalysis } from "../mockBehavioralData";
-import { getQuotes, type QuoteResult } from "../lib/api";
+import { getQuotes, getSectors, type QuoteResult, type SectorPerformance } from "../lib/api";
 import type { Rating } from "../types";
 import type { PageId } from "../types/nav";
 
@@ -30,6 +30,16 @@ interface MarketIntelligencePageProps {
   onTrade: (symbol: string) => void;
   onViewAnalysis: (symbol: string) => void;
   onNavigate: (page: PageId) => void;
+}
+
+function pctText(v: number | null): string {
+  if (v === null || v === undefined) return "—";
+  return `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
+}
+
+function pctClass(v: number | null): string {
+  if (v === null || v === undefined) return "text-ink-muted";
+  return v >= 0 ? "text-status-good" : "text-status-critical";
 }
 
 const STATUS_CLASS: Record<string, string> = {
@@ -61,6 +71,25 @@ export default function MarketIntelligencePage({
     };
   }, []);
   const overviewBySymbol = new Map(overview.map((q) => [q.symbol.toUpperCase(), q]));
+
+  // Live sector performance (deterministic, from real ETF history).
+  const [sectors, setSectors] = useState<SectorPerformance[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    getSectors()
+      .then((s) => {
+        if (alive) setSectors(s);
+      })
+      .catch(() => {
+        if (alive) setSectors([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const rankedSectors = (sectors ?? [])
+    .slice()
+    .sort((a, b) => (b.rel_strength_vs_spy ?? -Infinity) - (a.rel_strength_vs_spy ?? -Infinity));
 
   return (
     <div className="space-y-6">
@@ -123,46 +152,49 @@ export default function MarketIntelligencePage({
         </div>
       </SectionCard>
 
-      <SectionCard title="Industry Sector Ranking" description="Ranked strongest to weakest by leadership score">
+      <SectionCard
+        title="Industry Sector Ranking"
+        description="SPDR sector ETFs, ranked by 1-week relative strength vs SPY (computed from real prices)"
+      >
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-left text-sm">
+          <table className="w-full min-w-[560px] text-left text-sm">
             <thead>
               <tr className="border-b border-border text-xs uppercase tracking-wide text-ink-muted">
                 <th className="py-2 pr-3 font-medium">Sector</th>
+                <th className="py-2 pr-3 font-medium">ETF</th>
                 <th className="py-2 pr-3 font-medium">1D</th>
                 <th className="py-2 pr-3 font-medium">1W</th>
-                <th className="py-2 pr-3 font-medium">Rel. strength</th>
-                <th className="py-2 pr-3 font-medium">Volume</th>
-                <th className="py-2 font-medium">Leadership</th>
+                <th className="py-2 font-medium">Rel. vs SPY</th>
               </tr>
             </thead>
             <tbody>
-              {[...sectorRotation]
-                .sort((a, b) => b.leadershipScore - a.leadershipScore)
-                .map((s) => (
-                  <tr key={s.name} className="border-b border-border last:border-0">
-                    <td className="py-2.5 pr-3 font-medium text-ink-primary">{s.name}</td>
-                    <td
-                      className={`py-2.5 pr-3 ${
-                        s.dailyPct >= 0 ? "text-status-good" : "text-status-critical"
-                      }`}
-                    >
-                      {s.dailyPct >= 0 ? "+" : ""}
-                      {s.dailyPct.toFixed(1)}%
-                    </td>
-                    <td
-                      className={`py-2.5 pr-3 ${
-                        s.weeklyPct >= 0 ? "text-status-good" : "text-status-critical"
-                      }`}
-                    >
-                      {s.weeklyPct >= 0 ? "+" : ""}
-                      {s.weeklyPct.toFixed(1)}%
-                    </td>
-                    <td className="py-2.5 pr-3 text-ink-secondary">{s.relativeStrength}</td>
-                    <td className="py-2.5 pr-3 text-ink-secondary">{s.volume}</td>
-                    <td className="py-2.5 font-medium text-ink-primary">{s.leadershipScore}</td>
+              {sectors === null ? (
+                <tr>
+                  <td colSpan={5} className="py-3 text-ink-muted">
+                    Loading…
+                  </td>
+                </tr>
+              ) : (
+                rankedSectors.map((s) => (
+                  <tr key={s.symbol} className="border-b border-border last:border-0">
+                    <td className="py-2.5 pr-3 font-medium text-ink-primary">{s.sector}</td>
+                    <td className="py-2.5 pr-3 text-ink-muted">{s.symbol}</td>
+                    {s.status !== "ok" ? (
+                      <td colSpan={3} className="py-2.5 text-ink-muted">
+                        Insufficient data
+                      </td>
+                    ) : (
+                      <>
+                        <td className={`py-2.5 pr-3 ${pctClass(s.daily_pct)}`}>{pctText(s.daily_pct)}</td>
+                        <td className={`py-2.5 pr-3 ${pctClass(s.weekly_pct)}`}>{pctText(s.weekly_pct)}</td>
+                        <td className={`py-2.5 font-medium ${pctClass(s.rel_strength_vs_spy)}`}>
+                          {pctText(s.rel_strength_vs_spy)}
+                        </td>
+                      </>
+                    )}
                   </tr>
-                ))}
+                ))
+              )}
             </tbody>
           </table>
         </div>

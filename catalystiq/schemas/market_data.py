@@ -43,6 +43,20 @@ class QuoteResult(BaseModel):
     detail: str | None = None
 
 
+class SectorPerformance(BaseModel):
+    """Deterministic sector performance from real ETF history. All figures are
+    computed from provider OHLCV; an unavailable ETF is status="unavailable"
+    with null figures (never fabricated)."""
+
+    sector: str
+    symbol: str
+    status: str  # "ok" | "unavailable"
+    daily_pct: float | None = None
+    weekly_pct: float | None = None
+    rel_strength_vs_spy: float | None = None  # weekly_pct minus SPY weekly_pct
+    as_of: dt.date | None = None
+
+
 class FundamentalsSnapshot(BaseModel):
     symbol: str
     long_name: str | None = None

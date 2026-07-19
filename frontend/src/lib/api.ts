@@ -349,6 +349,21 @@ export function getQuotes(symbols: string[]): Promise<QuoteResult[]> {
   return request(`/market-data/quotes?symbols=${encodeURIComponent(symbols.join(","))}`);
 }
 
+export interface SectorPerformance {
+  sector: string;
+  symbol: string;
+  status: "ok" | "unavailable";
+  daily_pct: number | null;
+  weekly_pct: number | null;
+  rel_strength_vs_spy: number | null;
+  as_of: string | null;
+}
+
+/** Deterministic sector performance (SPDR sector ETFs, computed from real OHLCV). */
+export function getSectors(): Promise<SectorPerformance[]> {
+  return request("/market-data/sectors");
+}
+
 export function getOhlcv(symbol: string, days = 365): Promise<OHLCVBar[]> {
   return request(`/market-data/ohlcv/${encodeURIComponent(symbol)}?days=${days}`);
 }
