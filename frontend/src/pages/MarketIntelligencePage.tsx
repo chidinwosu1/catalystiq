@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { LineChart, TrendingDown, TrendingUp } from "lucide-react";
 import SectionCard from "../components/SectionCard";
 import DemoBadge from "../components/DemoBadge";
@@ -5,10 +6,25 @@ import RatingBadge from "../components/RatingBadge";
 import NextAction from "../components/NextAction";
 import BehavioralAnalysisTable from "../components/BehavioralAnalysisTable";
 import WorkflowBar from "../components/trade/WorkflowBar";
-import { catalysts, dailyWatchlist, marketOverview, sectorRotation } from "../mockMarketData";
+import { catalysts, dailyWatchlist, sectorRotation } from "../mockMarketData";
 import { marketWideBehavioralAnalysis } from "../mockBehavioralData";
+import { getQuotes, type QuoteResult } from "../lib/api";
 import type { Rating } from "../types";
 import type { PageId } from "../types/nav";
+
+// Live market-overview indices/rates -> Yahoo symbols. `pct` marks a rate
+// (10-yr yield) shown with a % suffix. Values are fetched live, not mocked.
+const MARKET_OVERVIEW: { label: string; symbol: string; pct?: boolean }[] = [
+  { label: "S&P 500", symbol: "^GSPC" },
+  { label: "Nasdaq", symbol: "^IXIC" },
+  { label: "Dow", symbol: "^DJI" },
+  { label: "Russell 2000", symbol: "^RUT" },
+  { label: "VIX", symbol: "^VIX" },
+  { label: "10-Year Treasury", symbol: "^TNX", pct: true },
+  { label: "US Dollar Index", symbol: "DX-Y.NYB" },
+  { label: "Oil (WTI)", symbol: "CL=F" },
+  { label: "Gold", symbol: "GC=F" },
+];
 
 interface MarketIntelligencePageProps {
   onTrade: (symbol: string) => void;
@@ -29,6 +45,23 @@ export default function MarketIntelligencePage({
 }: MarketIntelligencePageProps) {
   const topName = dailyWatchlist[0]?.symbol ?? "NVDA";
 
+  // Live market overview (real quotes; unavailable symbols show "Insufficient data").
+  const [overview, setOverview] = useState<QuoteResult[]>([]);
+  useEffect(() => {
+    let alive = true;
+    getQuotes(MARKET_OVERVIEW.map((m) => m.symbol))
+      .then((q) => {
+        if (alive) setOverview(q);
+      })
+      .catch(() => {
+        /* leave empty; render shows "Insufficient data", never fabricated */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const overviewBySymbol = new Map(overview.map((q) => [q.symbol.toUpperCase(), q]));
+
   return (
     <div className="space-y-6">
       <WorkflowBar current={1} onNavigate={onNavigate} />
@@ -44,34 +77,49 @@ export default function MarketIntelligencePage({
         <div>
           <h1 className="text-xl font-semibold text-ink-primary">Market Analysis</h1>
           <p className="mt-1 text-sm text-ink-secondary">
-            Daily macro dashboard - sector rankings, catalysts, and the watchlist below use
-            illustrative demo data until the Market Environment / Sector / News modules are
-            built.
+            Market Overview below is live. Sector rankings, catalysts, and the watchlist still
+            use illustrative demo data until those modules are wired.
           </p>
         </div>
         <DemoBadge />
       </div>
 
-      <SectionCard title="Market Overview">
+      <SectionCard title="Market Overview" description="Live index, rate, and commodity levels">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {marketOverview.map((row) => (
-            <div key={row.symbol} className="rounded-lg border border-border px-3 py-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-ink-primary">{row.label}</span>
-                <span
-                  className={`flex items-center gap-1 text-sm font-semibold ${
-                    row.changePct >= 0 ? "text-status-good" : "text-status-critical"
-                  }`}
-                >
-                  {row.changePct >= 0 ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
-                  {row.changePct >= 0 ? "+" : ""}
-                  {row.changePct.toFixed(1)}%
-                </span>
+          {MARKET_OVERVIEW.map(({ label, symbol, pct }) => {
+            const q = overviewBySymbol.get(symbol.toUpperCase());
+            const ok = q && q.status === "ok" && q.price !== null;
+            const cp = ok ? q!.change_pct : null;
+            return (
+              <div key={symbol} className="rounded-lg border border-border px-3 py-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-ink-primary">{label}</span>
+                  {cp !== null && cp !== undefined ? (
+                    <span
+                      className={`flex items-center gap-1 text-sm font-semibold ${
+                        cp >= 0 ? "text-status-good" : "text-status-critical"
+                      }`}
+                    >
+                      {cp >= 0 ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
+                      {cp >= 0 ? "+" : ""}
+                      {cp.toFixed(2)}%
+                    </span>
+                  ) : (
+                    <span className="text-xs text-ink-muted">—</span>
+                  )}
+                </div>
+                <p className="mt-0.5 text-lg font-semibold text-ink-primary">
+                  {ok ? (
+                    pct
+                      ? `${q!.price!.toFixed(2)}%`
+                      : q!.price!.toLocaleString(undefined, { maximumFractionDigits: 2 })
+                  ) : (
+                    <span className="text-sm font-normal text-ink-muted">Insufficient data</span>
+                  )}
+                </p>
               </div>
-              <p className="mt-0.5 text-lg font-semibold text-ink-primary">{row.level}</p>
-              <p className="mt-1 text-xs text-ink-secondary">{row.interpretation}</p>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </SectionCard>
 

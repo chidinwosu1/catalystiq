@@ -17,8 +17,17 @@ from catalystiq.providers.market_data import (
     MarketDataProvider,
     get_market_data_provider,
 )
-from catalystiq.schemas.market_data import FundamentalsSnapshot, NewsItem, OHLCVBar, Quote
+from catalystiq.schemas.market_data import (
+    FundamentalsSnapshot,
+    NewsItem,
+    OHLCVBar,
+    Quote,
+    QuoteResult,
+)
 from catalystiq.schemas.validation import DataQualityReport
+
+# Cap batch size so one request can't fan out into hundreds of provider calls.
+_MAX_BATCH_SYMBOLS = 50
 
 router = APIRouter(
     prefix="/market-data",
@@ -33,6 +42,42 @@ def get_quote(symbol: str, provider: MarketDataProvider = Depends(get_market_dat
         return provider.get_quote(symbol)
     except MarketDataError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/quotes", response_model=list[QuoteResult])
+def get_quotes(
+    symbols: str = Query(..., description="Comma-separated symbols, e.g. AAPL,MSFT,^VIX"),
+    provider: MarketDataProvider = Depends(get_market_data_provider),
+):
+    """Batch quotes for a ticker/index list (ticker strip, market overview).
+    Each symbol is fetched independently; a failure is reported as
+    status="unavailable" for that symbol only - the batch never fails as a
+    whole, and no value is fabricated."""
+    seen: set[str] = set()
+    results: list[QuoteResult] = []
+    for raw in symbols.split(","):
+        sym = raw.strip().upper()
+        if not sym or sym in seen:
+            continue
+        seen.add(sym)
+        if len(seen) > _MAX_BATCH_SYMBOLS:
+            break
+        try:
+            q = provider.get_quote(sym)
+            change = change_pct = None
+            if q.price is not None and q.previous_close:
+                change = q.price - q.previous_close
+                change_pct = (change / q.previous_close) * 100.0
+            results.append(
+                QuoteResult(
+                    symbol=sym, status="ok", price=q.price,
+                    previous_close=q.previous_close, change=change,
+                    change_pct=change_pct, as_of=q.as_of,
+                )
+            )
+        except MarketDataError as exc:
+            results.append(QuoteResult(symbol=sym, status="unavailable", detail=str(exc)))
+    return results
 
 
 @router.get("/ohlcv/{symbol}", response_model=list[OHLCVBar])

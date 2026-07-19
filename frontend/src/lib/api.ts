@@ -332,6 +332,23 @@ export function getQuote(symbol: string): Promise<Quote> {
   return request(`/market-data/quote/${encodeURIComponent(symbol)}`);
 }
 
+export interface QuoteResult {
+  symbol: string;
+  status: "ok" | "unavailable";
+  price: number | null;
+  previous_close: number | null;
+  change: number | null;
+  change_pct: number | null;
+  as_of: string | null;
+  detail: string | null;
+}
+
+/** Batch quotes for a symbol/index list (ticker strip, market overview). A
+ *  per-symbol failure comes back as status:"unavailable", never fabricated. */
+export function getQuotes(symbols: string[]): Promise<QuoteResult[]> {
+  return request(`/market-data/quotes?symbols=${encodeURIComponent(symbols.join(","))}`);
+}
+
 export function getOhlcv(symbol: string, days = 365): Promise<OHLCVBar[]> {
   return request(`/market-data/ohlcv/${encodeURIComponent(symbol)}?days=${days}`);
 }

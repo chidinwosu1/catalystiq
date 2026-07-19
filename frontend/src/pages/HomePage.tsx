@@ -22,6 +22,7 @@ import {
   Users,
 } from "lucide-react";
 import SignalNetwork from "../components/home/SignalNetwork";
+import { getQuotes, type QuoteResult } from "../lib/api";
 import type { PageId } from "../types/nav";
 
 interface HomePageProps {
@@ -58,18 +59,44 @@ function useRevealOnScroll() {
   return rootRef;
 }
 
-const TICKER: { label: string; value: string; change: string; dir: "up" | "dn" }[] = [
-  { label: "S&P 500", value: "5,842.31", change: "+0.4%", dir: "up" },
-  { label: "NASDAQ", value: "18,203.44", change: "+0.7%", dir: "up" },
-  { label: "VIX", value: "16.82", change: "-6.3%", dir: "dn" },
-  { label: "10Y", value: "4.31%", change: "+2.4%", dir: "up" },
-  { label: "NVDA", value: "138.42", change: "+1.2%", dir: "up" },
-  { label: "AVGO", value: "172.90", change: "+3.5%", dir: "up" },
-  { label: "UNH", value: "524.10", change: "+0.9%", dir: "up" },
-  { label: "Gold", value: "2,614", change: "+0.3%", dir: "up" },
-  { label: "WTI", value: "78.42", change: "-0.9%", dir: "dn" },
-  { label: "BTC", value: "67,410", change: "+1.6%", dir: "up" },
+// Live ticker: label -> Yahoo symbol. `pct` marks a rate (10Y yield) shown
+// with a % suffix. Values are fetched live; nothing here is hardcoded.
+const TICKER_SYMBOLS: { label: string; symbol: string; pct?: boolean }[] = [
+  { label: "S&P 500", symbol: "^GSPC" },
+  { label: "NASDAQ", symbol: "^IXIC" },
+  { label: "VIX", symbol: "^VIX" },
+  { label: "10Y", symbol: "^TNX", pct: true },
+  { label: "NVDA", symbol: "NVDA" },
+  { label: "AVGO", symbol: "AVGO" },
+  { label: "UNH", symbol: "UNH" },
+  { label: "Gold", symbol: "GC=F" },
+  { label: "WTI", symbol: "CL=F" },
+  { label: "BTC", symbol: "BTC-USD" },
 ];
+
+interface TickerRow {
+  label: string;
+  value: string; // formatted, or "—" when unavailable
+  change: string | null; // e.g. "+0.4%", or null when unavailable
+  dir: "up" | "dn" | "flat";
+}
+
+function buildTickerRows(quotes: QuoteResult[]): TickerRow[] {
+  const bySymbol = new Map(quotes.map((q) => [q.symbol.toUpperCase(), q]));
+  return TICKER_SYMBOLS.map(({ label, symbol, pct }) => {
+    const q = bySymbol.get(symbol.toUpperCase());
+    if (!q || q.status !== "ok" || q.price === null) {
+      return { label, value: "—", change: null, dir: "flat" as const };
+    }
+    const value = pct
+      ? `${q.price.toFixed(2)}%`
+      : q.price.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    const cp = q.change_pct;
+    const change = cp === null ? null : `${cp >= 0 ? "+" : ""}${cp.toFixed(2)}%`;
+    const dir = cp === null || cp === 0 ? "flat" : cp > 0 ? "up" : "dn";
+    return { label, value, change, dir: dir as "up" | "dn" | "flat" };
+  });
+}
 
 interface Offer {
   title: string;
@@ -207,6 +234,24 @@ const secTitle =
 export default function HomePage({ onNavigate }: HomePageProps) {
   const rootRef = useRevealOnScroll();
 
+  // Live market ticker (real quotes; "—" for anything unavailable).
+  const [tickerRows, setTickerRows] = useState<TickerRow[]>(
+    TICKER_SYMBOLS.map((t) => ({ label: t.label, value: "—", change: null, dir: "flat" }))
+  );
+  useEffect(() => {
+    let alive = true;
+    getQuotes(TICKER_SYMBOLS.map((t) => t.symbol))
+      .then((quotes) => {
+        if (alive) setTickerRows(buildTickerRows(quotes));
+      })
+      .catch(() => {
+        /* leave the placeholder dashes; never fabricate values */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const quickActions: { title: string; detail: string; icon: typeof LineChart; page: PageId }[] = [
     { title: "Start New Analysis", detail: "Research any ticker in depth.", icon: LineChart, page: "analysis" },
     { title: "Today's Opportunities", detail: "See the highest-conviction setups.", icon: Search, page: "analysis" },
@@ -228,12 +273,22 @@ export default function HomePage({ onNavigate }: HomePageProps) {
       {/* ===================== TICKER (top) ===================== */}
       <div className="overflow-hidden border-b border-border bg-page">
         <div className="flex w-max cq-marquee gap-9 py-2 font-mono text-[12.5px] text-ink-secondary">
-          {[...TICKER, ...TICKER].map((t, i) => (
+          {[...tickerRows, ...tickerRows].map((t, i) => (
             <span key={i} className="inline-flex items-center gap-1.5 whitespace-nowrap">
               <b className="font-semibold text-ink-primary">{t.label}</b> {t.value}{" "}
-              <span className={t.dir === "up" ? "text-status-good" : "text-status-critical"}>
-                {t.change}
-              </span>
+              {t.change && (
+                <span
+                  className={
+                    t.dir === "up"
+                      ? "text-status-good"
+                      : t.dir === "dn"
+                        ? "text-status-critical"
+                        : "text-ink-muted"
+                  }
+                >
+                  {t.change}
+                </span>
+              )}
             </span>
           ))}
         </div>

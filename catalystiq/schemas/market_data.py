@@ -28,6 +28,21 @@ class Quote(BaseModel):
     as_of: dt.datetime
 
 
+class QuoteResult(BaseModel):
+    """One symbol's entry in a batch quote response. A per-symbol failure is
+    reported as status="unavailable" (never fabricated) so one bad ticker
+    doesn't fail the whole batch."""
+
+    symbol: str
+    status: str  # "ok" | "unavailable"
+    price: float | None = None
+    previous_close: float | None = None
+    change: float | None = None
+    change_pct: float | None = None
+    as_of: dt.datetime | None = None
+    detail: str | None = None
+
+
 class FundamentalsSnapshot(BaseModel):
     symbol: str
     long_name: str | None = None
