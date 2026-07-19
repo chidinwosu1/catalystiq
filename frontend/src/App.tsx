@@ -4,6 +4,8 @@ import Header from "./components/Header";
 import Disclaimer from "./components/Disclaimer";
 import LoginScreen from "./components/LoginScreen";
 import HomePage from "./pages/HomePage";
+import PreferencesPage from "./pages/PreferencesPage";
+import TradeCenterPage from "./pages/TradeCenterPage";
 import TradeTicketPage from "./pages/TradeTicketPage";
 import PortfolioPage from "./pages/PortfolioPage";
 import MarketIntelligencePage from "./pages/MarketIntelligencePage";
@@ -36,9 +38,11 @@ function App() {
     setActivePage("home");
   }
 
-  function goToTrade(symbol: string) {
+  // The order ticket ("Confirm Trade" step) lives on its own route, reached
+  // from an opportunity, from Investment Strategy, or from a ticker search.
+  function goToTicket(symbol: string) {
     setTradeSymbol(symbol);
-    setActivePage("trade");
+    setActivePage("ticket");
   }
 
   function goToAnalysis(symbol: string) {
@@ -63,7 +67,7 @@ function App() {
       <Header
         activePage={activePage}
         onNavigate={setActivePage}
-        onSearch={goToTrade}
+        onSearch={goToTicket}
         onSignOut={handleSignOut}
       />
 
@@ -71,7 +75,15 @@ function App() {
         {activePage === "home" && (
           <HomePage onNavigate={setActivePage} onViewAnalysis={goToAnalysis} />
         )}
+        {activePage === "preferences" && <PreferencesPage onNavigate={setActivePage} />}
         {activePage === "trade" && (
+          <TradeCenterPage
+            onTrade={goToTicket}
+            onViewAnalysis={goToAnalysis}
+            onNavigate={setActivePage}
+          />
+        )}
+        {activePage === "ticket" && (
           <TradeTicketPage
             initialSymbol={tradeSymbol}
             onViewAnalysis={goToAnalysis}
@@ -80,18 +92,22 @@ function App() {
         )}
         {activePage === "portfolio" && (
           <PortfolioPage
-            onTrade={goToTrade}
+            onTrade={goToTicket}
             onViewAnalysis={goToAnalysis}
             onNavigate={setActivePage}
           />
         )}
         {activePage === "markets" && (
-          <MarketIntelligencePage onTrade={goToTrade} onViewAnalysis={goToAnalysis} />
+          <MarketIntelligencePage
+            onTrade={goToTicket}
+            onViewAnalysis={goToAnalysis}
+            onNavigate={setActivePage}
+          />
         )}
         {activePage === "analysis" && (
           <AnalysisJournalPage
             initialSymbol={analysisSymbol}
-            onTrade={goToTrade}
+            onTrade={goToTicket}
             onNavigate={setActivePage}
           />
         )}

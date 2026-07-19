@@ -31,6 +31,7 @@ import {
 } from "../lib/api";
 import SectionCard from "../components/SectionCard";
 import NextAction from "../components/NextAction";
+import WorkflowBar from "../components/trade/WorkflowBar";
 import type { PageId } from "../types/nav";
 
 interface TradeTicketPageProps {
@@ -416,6 +417,7 @@ export default function TradeTicketPage({
 
   return (
     <div className="mx-auto max-w-2xl space-y-5">
+      <WorkflowBar current={4} onNavigate={onNavigate} />
       <div>
         <h1 className="text-xl font-semibold text-ink-primary">Trade Ticket</h1>
         <p className="mt-1 text-sm text-ink-secondary">

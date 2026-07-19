@@ -4,13 +4,16 @@ import DemoBadge from "../components/DemoBadge";
 import RatingBadge from "../components/RatingBadge";
 import NextAction from "../components/NextAction";
 import BehavioralAnalysisTable from "../components/BehavioralAnalysisTable";
+import WorkflowBar from "../components/trade/WorkflowBar";
 import { catalysts, dailyWatchlist, marketOverview, sectorRotation } from "../mockMarketData";
 import { marketWideBehavioralAnalysis } from "../mockBehavioralData";
 import type { Rating } from "../types";
+import type { PageId } from "../types/nav";
 
 interface MarketIntelligencePageProps {
   onTrade: (symbol: string) => void;
   onViewAnalysis: (symbol: string) => void;
+  onNavigate: (page: PageId) => void;
 }
 
 const STATUS_CLASS: Record<string, string> = {
@@ -22,11 +25,13 @@ const STATUS_CLASS: Record<string, string> = {
 export default function MarketIntelligencePage({
   onTrade,
   onViewAnalysis,
+  onNavigate,
 }: MarketIntelligencePageProps) {
   const topName = dailyWatchlist[0]?.symbol ?? "NVDA";
 
   return (
     <div className="space-y-6">
+      <WorkflowBar current={1} onNavigate={onNavigate} />
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-ink-primary">Market Analysis</h1>

@@ -1,4 +1,16 @@
-export type PageId = "home" | "trade" | "portfolio" | "markets" | "analysis" | "data-sources";
+// "markets" (Market Overview) and "ticket" (order entry) are real pages but
+// intentionally not in the primary nav: Market Overview opens as a slide-out
+// inside the Trade Center, and the order ticket is reached as the "Confirm
+// Trade" step from an opportunity or from Investment Strategy.
+export type PageId =
+  | "home"
+  | "trade"
+  | "portfolio"
+  | "markets"
+  | "analysis"
+  | "ticket"
+  | "preferences"
+  | "data-sources";
 
 export interface PageDescriptor {
   id: PageId;
@@ -6,36 +18,31 @@ export interface PageDescriptor {
   description: string;
 }
 
+// Primary navigation — the investing workflow: discover, evaluate, decide, manage.
 export const PAGES: PageDescriptor[] = [
   {
     id: "home",
-    label: "Command Center",
+    label: "Home",
     description:
-      "Your investment command center - today's market read, highest-conviction opportunities, catalysts, alerts, and what to do next.",
+      "The Catalyst IQ overview - what it is, how it works, what powers it, and where to start.",
   },
   {
     id: "trade",
-    label: "Trade",
+    label: "Trade Center",
     description:
-      "Build and submit a paper order - real backend, all order types, optional bracket exits and scheduled execution.",
+      "Discover and compare today's highest-conviction opportunities, with the market read a slide-out away.",
+  },
+  {
+    id: "analysis",
+    label: "Investment Strategy",
+    description:
+      "Turn an opportunity into a personalized strategy: research, journal, and your own performance.",
   },
   {
     id: "portfolio",
     label: "Portfolio",
     description:
       "Your real account balance and positions from the connected paper-trading broker.",
-  },
-  {
-    id: "markets",
-    label: "Market Analysis",
-    description:
-      "The daily macro dashboard - index levels, sector ranking, catalysts, and investor behavior analysis.",
-  },
-  {
-    id: "analysis",
-    label: "Analysis",
-    description:
-      "Research a ticker, log your trades, and review your own performance over time.",
   },
   {
     id: "data-sources",
