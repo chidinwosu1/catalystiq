@@ -425,6 +425,22 @@ export function getOpportunityScore(symbol: string): Promise<OpportunityScore> {
   return request(`/analysis/${encodeURIComponent(symbol)}/opportunity-score`);
 }
 
+export interface OpportunityScan {
+  as_of: string;
+  formula_version: string;
+  universe_size: number;
+  eligible_count: number;
+  top: number;
+  candidates: OpportunityScore[];
+  ml: { status: string; reason: string };
+  note: string | null;
+}
+
+/** Ranked rule-based candidates from a curated universe scan (top N). */
+export function getOpportunityScan(top = 4): Promise<OpportunityScan> {
+  return request(`/analysis/opportunity-scan?top=${top}`);
+}
+
 export function getAccount(): Promise<AccountInfo> {
   return request("/paper/account");
 }

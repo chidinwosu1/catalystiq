@@ -51,3 +51,17 @@ class OpportunityScore(BaseModel):
     warnings: list[str]
     ml: MlStatus
     reason: str | None = None  # populated when status == "insufficient_data"
+
+
+class OpportunityScan(BaseModel):
+    """Ranked rule-based candidates from a universe scan. Only symbols with an
+    available (fully-eligible) score are candidates; nothing is mock-filled."""
+
+    as_of: dt.datetime
+    formula_version: str
+    universe_size: int
+    eligible_count: int
+    top: int
+    candidates: list[OpportunityScore]  # ranked by score desc, len <= top
+    ml: MlStatus
+    note: str | None = None

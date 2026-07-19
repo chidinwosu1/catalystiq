@@ -39,6 +39,7 @@ from catalystiq.schemas.market_data import OHLCVBar
 from catalystiq.schemas.opportunity import (
     FactorScore,
     MlStatus,
+    OpportunityScan,
     OpportunityScore,
     UnavailableFactor,
 )
@@ -392,4 +393,49 @@ def score_symbol(symbol, provider, db, now: dt.datetime) -> OpportunityScore:
     return build_opportunity_score(
         symbol, bars, now=now, market_bars=market_bars, market_symbol=market_symbol,
         sector_bars=sector_bars, sector_symbol=sector_symbol,
+    )
+
+
+# Curated, liquid large-cap starter universe for the ranked scan. This is a
+# controlled eligibility list, NOT the whole market - extend/replace as needed.
+# (A full constituent universe would need a screened, maintained symbol source.)
+SCAN_UNIVERSE: tuple[str, ...] = (
+    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AVGO", "TSLA",
+    "JPM", "V", "MA", "BAC", "UNH", "JNJ", "LLY", "ABBV",
+    "XOM", "CVX", "WMT", "COST", "PG", "KO", "PEP", "HD",
+)
+
+_MAX_SCAN_TOP = 10
+
+
+def scan_universe(provider, db, now: dt.datetime, top: int = 4, universe=None) -> OpportunityScan:
+    """Score every symbol in the universe with the rule-based engine, keep only
+    the eligible (status=available) ones, rank by score desc, and return the top
+    N. A symbol whose data can't be fetched or isn't eligible is skipped - it is
+    NEVER replaced with mock or fabricated data."""
+    from catalystiq.providers.market_data import MarketDataError
+
+    symbols = tuple(universe) if universe else SCAN_UNIVERSE
+    top = max(0, min(top, _MAX_SCAN_TOP))
+
+    eligible: list[OpportunityScore] = []
+    for symbol in symbols:
+        try:
+            result = score_symbol(symbol, provider, db, now)
+        except MarketDataError:
+            continue  # unfetchable -> skip, never mock-fill
+        if result.status == "available" and result.score is not None:
+            eligible.append(result)
+
+    eligible.sort(key=lambda r: (-(r.score or 0), r.symbol))
+    candidates = eligible[:top]
+    return OpportunityScan(
+        as_of=now if now.tzinfo else now.replace(tzinfo=dt.timezone.utc),
+        formula_version=FORMULA_VERSION,
+        universe_size=len(symbols),
+        eligible_count=len(eligible),
+        top=top,
+        candidates=candidates,
+        ml=_ML_NOT_AVAILABLE,
+        note=None if eligible else "No symbols currently meet the rule-based eligibility criteria.",
     )

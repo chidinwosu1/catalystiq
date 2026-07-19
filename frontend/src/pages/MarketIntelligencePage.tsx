@@ -2,14 +2,19 @@ import { useEffect, useState } from "react";
 import { LineChart, TrendingDown, TrendingUp } from "lucide-react";
 import SectionCard from "../components/SectionCard";
 import DemoBadge from "../components/DemoBadge";
-import RatingBadge from "../components/RatingBadge";
 import NextAction from "../components/NextAction";
 import BehavioralAnalysisTable from "../components/BehavioralAnalysisTable";
 import WorkflowBar from "../components/trade/WorkflowBar";
-import { catalysts, dailyWatchlist } from "../mockMarketData";
+import { catalysts } from "../mockMarketData";
 import { marketWideBehavioralAnalysis } from "../mockBehavioralData";
-import { getQuotes, getSectors, type QuoteResult, type SectorPerformance } from "../lib/api";
-import type { Rating } from "../types";
+import {
+  getOpportunityScan,
+  getQuotes,
+  getSectors,
+  type OpportunityScore,
+  type QuoteResult,
+  type SectorPerformance,
+} from "../lib/api";
 import type { PageId } from "../types/nav";
 
 // Live market-overview indices/rates -> Yahoo symbols. `pct` marks a rate
@@ -42,6 +47,11 @@ function pctClass(v: number | null): string {
   return v >= 0 ? "text-status-good" : "text-status-critical";
 }
 
+function factorPoints(w: OpportunityScore, name: string): string {
+  const f = w.factors.find((x) => x.name === name);
+  return f && f.score !== null ? `${f.score}/${f.max_score}` : "—";
+}
+
 const STATUS_CLASS: Record<string, string> = {
   Confirmed: "border-status-good/40 bg-status-good-soft text-status-good",
   Proposed: "border-status-warning/40 bg-status-warning-soft text-status-warning",
@@ -53,7 +63,25 @@ export default function MarketIntelligencePage({
   onViewAnalysis,
   onNavigate,
 }: MarketIntelligencePageProps) {
-  const topName = dailyWatchlist[0]?.symbol ?? "NVDA";
+  // Rule-based watchlist candidates from the universe scan (top 4).
+  const [watchlist, setWatchlist] = useState<OpportunityScore[] | null>(null);
+  const [watchlistNote, setWatchlistNote] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    getOpportunityScan(4)
+      .then((scan) => {
+        if (!alive) return;
+        setWatchlist(scan.candidates);
+        setWatchlistNote(scan.note);
+      })
+      .catch(() => {
+        if (alive) setWatchlist([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const topName = watchlist && watchlist.length ? watchlist[0].symbol : "SPY";
 
   // Live market overview (real quotes; unavailable symbols show "Insufficient data").
   const [overview, setOverview] = useState<QuoteResult[]>([]);
@@ -106,8 +134,8 @@ export default function MarketIntelligencePage({
         <div>
           <h1 className="text-xl font-semibold text-ink-primary">Market Analysis</h1>
           <p className="mt-1 text-sm text-ink-secondary">
-            Market Overview below is live. Sector rankings, catalysts, and the watchlist still
-            use illustrative demo data until those modules are wired.
+            Market Overview, sector ranking, and the rule-based watchlist are live. The catalysts
+            and behavioral sections remain illustrative demo data (no validated source yet).
           </p>
         </div>
         <DemoBadge />
@@ -227,55 +255,69 @@ export default function MarketIntelligencePage({
         rows={marketWideBehavioralAnalysis}
       />
 
-      <SectionCard title="Daily Watchlist">
+      <SectionCard
+        title="Daily Watchlist"
+        description="Top rule-based candidates by Opportunity Score (Setup Strength) - technical only, not a probability of profit or an ML prediction."
+      >
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[820px] text-left text-sm">
+          <table className="w-full min-w-[560px] text-left text-sm">
             <thead>
               <tr className="border-b border-border text-xs uppercase tracking-wide text-ink-muted">
                 <th className="py-2 pr-3 font-medium">Ticker</th>
-                <th className="py-2 pr-3 font-medium">Intraday</th>
-                <th className="py-2 pr-3 font-medium">Swing</th>
-                <th className="py-2 pr-3 font-medium">Confidence</th>
-                <th className="py-2 pr-3 font-medium">Bull / Bear</th>
-                <th className="py-2 pr-3 font-medium">Expected move</th>
-                <th className="py-2 pr-3 font-medium">Catalyst</th>
+                <th className="py-2 pr-3 font-medium">Opportunity Score</th>
+                <th className="py-2 pr-3 font-medium">Setup</th>
+                <th className="py-2 pr-3 font-medium">Trend</th>
+                <th className="py-2 pr-3 font-medium">Momentum</th>
                 <th className="py-2 font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {dailyWatchlist.map((w) => (
-                <tr key={w.symbol} className="border-b border-border last:border-0">
-                  <td className="py-2.5 pr-3 font-medium text-ink-primary">{w.symbol}</td>
-                  <td className="py-2.5 pr-3">
-                    <RatingBadge rating={w.intradayRating as Rating} />
-                  </td>
-                  <td className="py-2.5 pr-3">
-                    <RatingBadge rating={w.swingRating as Rating} />
-                  </td>
-                  <td className="py-2.5 pr-3 text-ink-secondary">{w.confidence}</td>
-                  <td className="py-2.5 pr-3 text-ink-secondary">
-                    {w.bullishPct}% / {w.bearishPct}%
-                  </td>
-                  <td className="py-2.5 pr-3 text-ink-secondary">{w.expectedMove}</td>
-                  <td className="py-2.5 pr-3 text-ink-secondary">{w.catalyst}</td>
-                  <td className="py-2.5">
-                    <div className="flex gap-2 text-xs">
-                      <button
-                        onClick={() => onTrade(w.symbol)}
-                        className="font-medium text-brand-blue hover:underline"
-                      >
-                        Trade
-                      </button>
-                      <button
-                        onClick={() => onViewAnalysis(w.symbol)}
-                        className="font-medium text-ink-secondary hover:text-ink-primary"
-                      >
-                        Analysis
-                      </button>
-                    </div>
+              {watchlist === null ? (
+                <tr>
+                  <td colSpan={6} className="py-3 text-ink-muted">
+                    Loading…
                   </td>
                 </tr>
-              ))}
+              ) : watchlist.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-3 text-ink-muted">
+                    {watchlistNote ?? "No candidates meet the rule-based criteria right now."}
+                  </td>
+                </tr>
+              ) : (
+                watchlist.map((w) => (
+                  <tr key={w.symbol} className="border-b border-border last:border-0">
+                    <td className="py-2.5 pr-3 font-medium text-ink-primary">{w.symbol}</td>
+                    <td className="py-2.5 pr-3 font-semibold tabular-nums text-ink-primary">
+                      {w.score}
+                      <span className="text-ink-muted"> / 100</span>
+                    </td>
+                    <td className="py-2.5 pr-3 text-ink-secondary">{w.label}</td>
+                    <td className="py-2.5 pr-3 tabular-nums text-ink-secondary">
+                      {factorPoints(w, "trend")}
+                    </td>
+                    <td className="py-2.5 pr-3 tabular-nums text-ink-secondary">
+                      {factorPoints(w, "momentum")}
+                    </td>
+                    <td className="py-2.5">
+                      <div className="flex gap-2 text-xs">
+                        <button
+                          onClick={() => onTrade(w.symbol)}
+                          className="font-medium text-brand-blue hover:underline"
+                        >
+                          Trade
+                        </button>
+                        <button
+                          onClick={() => onViewAnalysis(w.symbol)}
+                          className="font-medium text-ink-secondary hover:text-ink-primary"
+                        >
+                          Analysis
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

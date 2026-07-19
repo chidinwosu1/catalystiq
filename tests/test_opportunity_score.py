@@ -193,6 +193,55 @@ def test_endpoint_returns_valid_contract(client, test_db_session):
     assert "probability" not in json.dumps(body).lower()
 
 
+def test_scan_ranks_eligible_and_never_mock_fills(client, test_db_session):
+    from catalystiq.main import app
+    from catalystiq.providers.market_data import MarketDataError, get_market_data_provider
+    from catalystiq.schemas.market_data import FundamentalsSnapshot, Quote
+
+    today = dt.date.today()
+    # AAA rises fastest (best setup), BBB slower, BAD has no data (skipped).
+    trends = {"AAA": 0.30, "BBB": 0.10, "SPY": 0.10}
+
+    class _FakeProvider:
+        def get_ohlcv(self, symbol, start, end=None, interval="1d"):
+            symbol = symbol.upper()
+            if symbol == "BAD":
+                raise MarketDataError("no data for BAD")
+            t = trends.get(symbol, 0.15)
+            return _bars(_bizdays_ending(today, 300), _rising(300, 100, t, 4))
+
+        def get_quote(self, symbol):
+            return Quote(symbol=symbol.upper(), price=175.0, previous_close=174.0,
+                         as_of=dt.datetime.now(dt.timezone.utc))
+
+        def get_fundamentals(self, symbol):
+            return FundamentalsSnapshot(symbol=symbol.upper(), sector="Technology",
+                                        as_of=dt.datetime.now(dt.timezone.utc))
+
+        def get_news(self, symbol, limit=10):
+            return []
+
+    app.dependency_overrides[get_market_data_provider] = lambda: _FakeProvider()
+    try:
+        r = client.get("/analysis/opportunity-scan", params={"top": 4, "symbols": "AAA,BBB,BAD"})
+    finally:
+        del app.dependency_overrides[get_market_data_provider]
+    assert r.status_code == 200
+    body = r.json()
+    assert body["universe_size"] == 3
+    # BAD is skipped (unfetchable), not mock-filled.
+    syms = [c["symbol"] for c in body["candidates"]]
+    assert "BAD" not in syms
+    assert set(syms) <= {"AAA", "BBB"}
+    # Ranked by score descending.
+    scores = [c["score"] for c in body["candidates"]]
+    assert scores == sorted(scores, reverse=True)
+    assert body["ml"]["status"] == "not_available"
+    # Every candidate is a real, available rule-based score.
+    for c in body["candidates"]:
+        assert c["status"] == "available" and c["score_type"] == "rule_based"
+
+
 def test_opportunity_score_does_not_import_fred():
     src = (_REPO_ROOT / "catalystiq" / "analysis" / "opportunity_score.py").read_text()
     tree = ast.parse(src)

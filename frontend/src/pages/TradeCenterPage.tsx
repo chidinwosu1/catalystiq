@@ -1,15 +1,12 @@
-import { useMemo, useState } from "react";
-import { ArrowRight, Globe, Zap } from "lucide-react";
-import DemoBadge from "../components/DemoBadge";
-import RatingBadge from "../components/RatingBadge";
-import RecentActivity from "../components/dashboard/RecentActivity";
+import { useEffect, useState } from "react";
+import { AlertTriangle, Info, Loader2 } from "lucide-react";
 import WorkflowBar from "../components/trade/WorkflowBar";
-import OpportunityPanel from "../components/trade/OpportunityPanel";
-import MarketOverviewPanel from "../components/trade/MarketOverviewPanel";
-import { opportunities, type OpportunityDetail } from "../mockTradeCenter";
-import { riskRole, roleClasses } from "../lib/theme";
-import { useQuotes } from "../lib/useQuotes";
-import type { RiskLevel } from "../mockDashboardData";
+import {
+  ApiError,
+  getOpportunityScan,
+  getQuotes,
+  type OpportunityScore,
+} from "../lib/api";
 import type { PageId } from "../types/nav";
 
 interface TradeCenterPageProps {
@@ -18,103 +15,86 @@ interface TradeCenterPageProps {
   onNavigate: (page: PageId) => void;
 }
 
-type SortKey = "catalyst" | "pop" | "risk";
-type RiskFilter = "all" | "Low" | "Moderate";
+const FACTOR_LABEL: Record<string, string> = {
+  trend: "Trend",
+  momentum: "Momentum",
+  volume_liquidity: "Volume/Liq.",
+  volatility_risk: "Volatility",
+  market_sector: "Mkt/Sector",
+};
 
-const RISK_ORDER: Record<RiskLevel, number> = { Low: 0, Moderate: 1, Elevated: 2, High: 3 };
-const SORTS: { key: SortKey; label: string }[] = [
-  { key: "catalyst", label: "Catalyst score" },
-  { key: "pop", label: "Prob. of profit" },
-  { key: "risk", label: "Lowest risk" },
-];
-const FILTERS: { key: RiskFilter; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "Low", label: "Low risk" },
-  { key: "Moderate", label: "Moderate" },
-];
+function bandTone(label: string | null): string {
+  if (label === "Strong setup" || label === "Favorable setup") return "text-status-good";
+  if (label === "Weak setup" || label === "Unfavorable setup") return "text-status-critical";
+  return "text-ink-primary";
+}
 
-function OpportunityCard({
-  opp,
+function CandidateCard({
+  c,
   livePrice,
-  onReview,
   onTrade,
+  onAnalyze,
 }: {
-  opp: OpportunityDetail;
+  c: OpportunityScore;
   livePrice: number | null;
-  onReview: () => void;
   onTrade: () => void;
+  onAnalyze: () => void;
 }) {
-  const risk = roleClasses[riskRole(opp.risk)];
   return (
-    <div
-      onClick={onReview}
-      className="cq-glass flex cursor-pointer flex-col rounded-[18px] p-[18px] transition-all hover:-translate-y-1 hover:border-brand-blue/40"
-    >
+    <div className="cq-glass flex flex-col rounded-[18px] p-[18px]">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <div className="text-[18px] font-bold tracking-tight text-ink-primary">{opp.symbol}</div>
-          <div className="mt-px text-[11.5px] text-ink-muted">{opp.companyName}</div>
-          <div className="mt-1 font-mono text-[12.5px] text-ink-secondary">
+          <div className="text-[18px] font-bold tracking-tight text-ink-primary">{c.symbol}</div>
+          <div className="mt-px font-mono text-[12.5px] text-ink-secondary">
             {livePrice != null ? (
               <>
                 {livePrice.toLocaleString("en-US", { style: "currency", currency: "USD" })}{" "}
                 <span className="text-[#5ea8ff]">live</span>
               </>
             ) : (
-              <span className="text-ink-muted">{opp.price}</span>
+              <span className="text-ink-muted">—</span>
             )}
           </div>
         </div>
-        <div className="flex flex-col items-end gap-2">
-          <RatingBadge rating={opp.rating} />
-          <div className="text-right">
-            <span className="flex items-center gap-1 font-mono text-[15px] font-bold text-[#5ea8ff]">
-              <Zap size={13} /> {opp.catalystScore}
-            </span>
-            <div className="text-[9.5px] uppercase tracking-wide text-ink-muted">Catalyst</div>
+        <div className="text-right">
+          <div className={`font-mono text-[20px] font-bold ${bandTone(c.label)}`}>
+            {c.score}
+            <span className="text-[12px] font-normal text-ink-muted"> / 100</span>
           </div>
+          <div className={`text-[11px] font-semibold ${bandTone(c.label)}`}>{c.label}</div>
         </div>
       </div>
 
-      <div className="mt-3.5 grid grid-cols-2 gap-x-3 gap-y-2.5 text-[12px]">
-        <div>
-          <div className="text-ink-muted">Prob. of profit</div>
-          <div className="mt-px font-semibold text-ink-primary">{opp.probabilityOfProfit}%</div>
-        </div>
-        <div>
-          <div className="text-ink-muted">Expected return</div>
-          <div className="mt-px font-semibold text-status-good">{opp.expectedReturn}</div>
-        </div>
-        <div>
-          <div className="text-ink-muted">Risk</div>
-          <div className={`mt-px font-semibold ${risk.text}`}>{opp.risk}</div>
-        </div>
-        <div>
-          <div className="text-ink-muted">Holding period</div>
-          <div className="mt-px font-semibold text-ink-primary">{opp.holdingPeriod}</div>
-        </div>
+      <div className="mt-3 space-y-1">
+        {c.factors.map((f) => (
+          <div key={f.name} className="flex items-center gap-2 text-[11px]">
+            <span className="w-20 shrink-0 text-ink-muted">{FACTOR_LABEL[f.name] ?? f.name}</span>
+            <div className="h-1.5 flex-1 overflow-hidden rounded bg-surface-2">
+              <div
+                className="h-full rounded bg-brand-blue"
+                style={{ width: `${f.score !== null ? (f.score / f.max_score) * 100 : 0}%` }}
+              />
+            </div>
+            <span className="w-10 shrink-0 text-right tabular-nums text-ink-secondary">
+              {f.score}/{f.max_score}
+            </span>
+          </div>
+        ))}
       </div>
 
-      <div className="mt-3.5 rounded-xl border border-border bg-white/[0.02] px-3 py-2.5">
-        <div className="text-[9.5px] uppercase tracking-wide text-ink-muted">Primary catalyst</div>
-        <div className="mt-0.5 text-[12.5px] text-ink-secondary">{opp.primaryCatalyst}</div>
+      <div className="mt-2 text-[10.5px] text-ink-muted">
+        Rule-based · {c.factor_coverage} · data {c.freshness}
       </div>
 
       <div className="mt-4 flex gap-2">
         <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onReview();
-          }}
+          onClick={onAnalyze}
           className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-brand-blue px-3.5 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-brand-blue/90"
         >
-          Review opportunity
+          Analysis
         </button>
         <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onTrade();
-          }}
+          onClick={onTrade}
           className="rounded-xl border border-border-strong px-3.5 py-2.5 text-[13px] font-semibold text-ink-secondary transition-colors hover:border-brand-blue hover:text-ink-primary"
         >
           Trade
@@ -129,40 +109,45 @@ export default function TradeCenterPage({
   onViewAnalysis,
   onNavigate,
 }: TradeCenterPageProps) {
-  const [sortKey, setSortKey] = useState<SortKey>("catalyst");
-  const [filter, setFilter] = useState<RiskFilter>("all");
-  const [showAll, setShowAll] = useState(false);
-  const [selected, setSelected] = useState<number | null>(null);
-  const [expanded, setExpanded] = useState(false);
-  const [marketOpen, setMarketOpen] = useState(false);
-  const [marketExpanded, setMarketExpanded] = useState(false);
+  const [candidates, setCandidates] = useState<OpportunityScore[] | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [prices, setPrices] = useState<Record<string, number | null>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Live quotes for every opportunity; falls back to the demo price per card.
-  const { prices } = useQuotes(useMemo(() => opportunities.map((o) => o.symbol), []));
-
-  const sorted = useMemo(() => {
-    const list = opportunities.filter((o) => filter === "all" || o.risk === filter);
-    return [...list].sort((a, b) => {
-      if (sortKey === "catalyst") return b.catalystScore - a.catalystScore;
-      if (sortKey === "pop") return b.probabilityOfProfit - a.probabilityOfProfit;
-      return RISK_ORDER[a.risk] - RISK_ORDER[b.risk] || b.catalystScore - a.catalystScore;
-    });
-  }, [sortKey, filter]);
-
-  const visible = showAll ? sorted : sorted.slice(0, 4);
-
-  function openReview(opp: OpportunityDetail) {
-    setMarketOpen(false);
-    setSelected(opportunities.indexOf(opp));
-  }
-  function closeReview() {
-    setSelected(null);
-    setExpanded(false);
-  }
-  function openMarket() {
-    setSelected(null);
-    setMarketOpen(true);
-  }
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    setError(null);
+    getOpportunityScan(4)
+      .then((scan) => {
+        if (!alive) return;
+        setCandidates(scan.candidates);
+        setNote(scan.note);
+        const syms = scan.candidates.map((c) => c.symbol);
+        if (syms.length) {
+          getQuotes(syms)
+            .then((q) => {
+              if (!alive) return;
+              const m: Record<string, number | null> = {};
+              q.forEach((r) => (m[r.symbol.toUpperCase()] = r.status === "ok" ? r.price : null));
+              setPrices(m);
+            })
+            .catch(() => {
+              /* live price is optional; never fabricated */
+            });
+        }
+      })
+      .catch((e) => {
+        if (alive) setError(e instanceof ApiError ? e.message : "Could not load candidates.");
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   return (
     <div>
@@ -174,111 +159,51 @@ export default function TradeCenterPage({
             Trade Center
           </span>
           <h1 className="mt-2 text-[clamp(26px,3vw,34px)] font-bold tracking-[-0.025em] text-ink-primary">
-            Highest-conviction opportunities
+            Highest-conviction setups
           </h1>
-          <p className="mt-1 max-w-[60ch] text-[14.5px] text-ink-secondary">
-            The model's strongest setups right now, ranked by catalyst score. Review any one for the
-            full thesis — the list stays right where you left it.
+          <p className="mt-1 max-w-[64ch] text-[14.5px] text-ink-secondary">
+            The top candidates from a universe scan, ranked by the Rule-Based Opportunity Score
+            (Setup Strength). Technical setup strength only — not a probability of profit, not an
+            AI/ML prediction, and not a buy/sell instruction.
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={openMarket}
-            className="cq-glass inline-flex items-center gap-2 rounded-xl px-3.5 py-2.5 text-[13px] font-semibold text-ink-primary transition-transform hover:-translate-y-0.5"
-          >
-            <Globe size={16} className="text-[#5ea8ff]" />
-            Market Overview
-          </button>
-          <DemoBadge />
-        </div>
       </div>
 
-      {/* Controls */}
-      <div className="my-5 flex flex-wrap items-center gap-2.5">
-        <div className="flex gap-0.5 rounded-xl border border-border bg-surface p-0.5">
-          {SORTS.map((s) => (
-            <button
-              key={s.key}
-              onClick={() => setSortKey(s.key)}
-              className={`rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors ${
-                sortKey === s.key
-                  ? "bg-surface-3 text-ink-primary"
-                  : "text-ink-secondary hover:text-ink-primary"
-              }`}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-        {FILTERS.map((f) => (
-          <button
-            key={f.key}
-            onClick={() => {
-              setFilter(f.key);
-              setShowAll(true);
-            }}
-            className={`rounded-full border px-3 py-1.5 text-[12.5px] transition-colors ${
-              filter === f.key
-                ? "border-brand-blue/45 bg-brand-blue/10 text-ink-primary"
-                : "border-border bg-surface text-ink-secondary hover:text-ink-primary"
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
-        <div className="flex-1" />
-        <button
-          onClick={() => setShowAll((v) => !v)}
-          className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-[#5ea8ff] hover:underline"
-        >
-          {showAll ? "Show top 4 only" : "View all opportunities"}
-          <ArrowRight size={14} />
-        </button>
+      <div className="mt-5">
+        {loading && (
+          <div className="flex items-center gap-2 text-sm text-ink-secondary">
+            <Loader2 size={14} className="animate-spin" /> Scanning the universe…
+          </div>
+        )}
+
+        {error && (
+          <div className="flex items-start gap-2 rounded-lg border border-status-critical/40 bg-status-critical-soft px-3 py-2 text-xs text-status-critical">
+            <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {!loading && !error && candidates && candidates.length === 0 && (
+          <div className="flex items-start gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-ink-secondary">
+            <Info size={14} className="mt-0.5 shrink-0" />
+            <span>{note ?? "No symbols currently meet the rule-based eligibility criteria."}</span>
+          </div>
+        )}
+
+        {candidates && candidates.length > 0 && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {candidates.map((c) => (
+              <CandidateCard
+                key={c.symbol}
+                c={c}
+                livePrice={prices[c.symbol.toUpperCase()] ?? null}
+                onTrade={() => onTrade(c.symbol)}
+                onAnalyze={() => onViewAnalysis(c.symbol)}
+              />
+            ))}
+          </div>
+        )}
       </div>
-
-      {/* Grid */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {visible.map((opp) => (
-          <OpportunityCard
-            key={opp.symbol}
-            opp={opp}
-            livePrice={prices[opp.symbol] ?? null}
-            onReview={() => openReview(opp)}
-            onTrade={() => onTrade(opp.symbol)}
-          />
-        ))}
-      </div>
-
-      {/* Recent activity */}
-      <div className="mt-10">
-        <RecentActivity onResume={onViewAnalysis} />
-      </div>
-
-      <OpportunityPanel
-        opp={selected !== null ? opportunities[selected] : null}
-        livePrice={selected !== null ? prices[opportunities[selected].symbol] ?? null : null}
-        expanded={expanded}
-        onClose={closeReview}
-        onToggleExpand={() => setExpanded((v) => !v)}
-        onTrade={(sym) => {
-          closeReview();
-          onTrade(sym);
-        }}
-        onAnalyze={(sym) => {
-          closeReview();
-          onViewAnalysis(sym);
-        }}
-      />
-
-      <MarketOverviewPanel
-        open={marketOpen}
-        expanded={marketExpanded}
-        onClose={() => {
-          setMarketOpen(false);
-          setMarketExpanded(false);
-        }}
-        onToggleExpand={() => setMarketExpanded((v) => !v)}
-      />
     </div>
   );
 }
