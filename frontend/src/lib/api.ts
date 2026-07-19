@@ -382,6 +382,49 @@ export function getTechnicalSnapshot(symbol: string, days = 365 * 5): Promise<Te
   return request(`/analysis/technical/${encodeURIComponent(symbol)}?days=${days}`);
 }
 
+// --- Rule-Based Opportunity Score (Setup Strength) ---------------------
+// A transparent, deterministic technical setup-strength score. NOT a
+// probability of profit, AI confidence, or ML prediction. The `ml` block is
+// always present and not_available until validated models exist.
+
+export interface OpportunityFactor {
+  name: string;
+  score: number | null;
+  max_score: number;
+  status: "available" | "insufficient_data";
+  inputs: Record<string, unknown>;
+  explanation: string;
+  formula_version: string;
+}
+
+export interface OpportunityUnavailableFactor {
+  name: string;
+  reason: string;
+}
+
+export interface OpportunityScore {
+  symbol: string;
+  status: "available" | "insufficient_data";
+  score_type: string; // "rule_based"
+  score: number | null;
+  max_score: number;
+  label: string | null;
+  formula_version: string;
+  calculated_at: string;
+  data_as_of: string | null;
+  freshness: string;
+  factor_coverage: string;
+  factors: OpportunityFactor[];
+  unavailable_factors: OpportunityUnavailableFactor[];
+  warnings: string[];
+  ml: { status: string; reason: string };
+  reason: string | null;
+}
+
+export function getOpportunityScore(symbol: string): Promise<OpportunityScore> {
+  return request(`/analysis/${encodeURIComponent(symbol)}/opportunity-score`);
+}
+
 export function getAccount(): Promise<AccountInfo> {
   return request("/paper/account");
 }

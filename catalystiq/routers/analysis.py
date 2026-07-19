@@ -11,10 +11,13 @@ See catalystiq/pipelines/market_price_pipeline.py.
 """
 from __future__ import annotations
 
+import datetime as dt
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from catalystiq.analysis.market_context import SECTOR_ETF_MAP
+from catalystiq.analysis.opportunity_score import score_symbol
 from catalystiq.auth import verify_action_key
 from catalystiq.db.base import get_db
 from catalystiq.pipelines.market_price_pipeline import GoldProduct, build_gold, ensure_fresh
@@ -24,6 +27,7 @@ from catalystiq.providers.market_data import (
     get_market_data_provider,
 )
 from catalystiq.schemas.analysis import TechnicalSnapshot
+from catalystiq.schemas.opportunity import OpportunityScore
 from catalystiq.schemas.market_context import MarketContextSnapshot
 from catalystiq.schemas.market_structure import MarketStructureSnapshot
 from catalystiq.schemas.risk import RiskSnapshot
@@ -71,6 +75,23 @@ def get_technical_snapshot(
         symbol, db, requested_products={GoldProduct.TECHNICAL}, provider_name=type(provider).__name__
     )
     return results[GoldProduct.TECHNICAL]
+
+
+@router.get("/{symbol}/opportunity-score", response_model=OpportunityScore)
+def get_opportunity_score(
+    symbol: str,
+    provider: MarketDataProvider = Depends(get_market_data_provider),
+    db: Session = Depends(get_db),
+):
+    """Deterministic Rule-Based Opportunity Score (Setup Strength) - a
+    transparent 0-100 technical setup-strength read, NOT a probability of
+    profit or an ML/AI prediction, and never a buy/sell instruction. Returns
+    status "insufficient_data" (never a guessed or renormalized number) when a
+    required factor is missing, stale, or lacks history."""
+    try:
+        return score_symbol(symbol, provider, db, now=dt.datetime.now(dt.timezone.utc))
+    except MarketDataError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.get("/{symbol}/market-structure", response_model=MarketStructureSnapshot)
