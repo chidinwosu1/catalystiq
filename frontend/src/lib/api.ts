@@ -208,7 +208,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       credentials: "include",
       headers,
     });
-  } catch {
+  } catch (err) {
+    // A caller-initiated cancellation (AbortController) is not a reachability
+    // failure - rethrow it so effects can ignore superseded requests instead of
+    // surfacing a misleading "could not reach the API" error.
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
     throw new ApiError(0, `Could not reach the API at ${BASE_URL}. Is the backend running?`);
   }
 
@@ -328,8 +332,8 @@ export function getFredContext(): Promise<MacroContext> {
   return request("/fred/context");
 }
 
-export function getQuote(symbol: string): Promise<Quote> {
-  return request(`/market-data/quote/${encodeURIComponent(symbol)}`);
+export function getQuote(symbol: string, signal?: AbortSignal): Promise<Quote> {
+  return request(`/market-data/quote/${encodeURIComponent(symbol)}`, { signal });
 }
 
 export interface QuoteResult {
@@ -374,8 +378,11 @@ export function ingestPriceHistory(symbol: string, days = 365 * 5): Promise<Data
   });
 }
 
-export function getFundamentals(symbol: string): Promise<FundamentalsSnapshot> {
-  return request(`/market-data/fundamentals/${encodeURIComponent(symbol)}`);
+export function getFundamentals(
+  symbol: string,
+  signal?: AbortSignal
+): Promise<FundamentalsSnapshot> {
+  return request(`/market-data/fundamentals/${encodeURIComponent(symbol)}`, { signal });
 }
 
 export function getTechnicalSnapshot(symbol: string, days = 365 * 5): Promise<TechnicalSnapshot> {
@@ -439,6 +446,29 @@ export interface OpportunityScan {
 /** Ranked rule-based candidates from a curated universe scan (top N). */
 export function getOpportunityScan(top = 4): Promise<OpportunityScan> {
   return request(`/analysis/opportunity-scan?top=${top}`);
+}
+
+// A completed/in-flight scan is shared across components so that, e.g., the
+// Market Intelligence and Trade Center pages mounting together reuse ONE scan
+// instead of each launching a full universe scan (which also protects against
+// React StrictMode's double-invoked effects in dev). The window is short so the
+// data stays fresh; a failed scan is not cached, so a later mount can retry.
+const SCAN_SHARE_MS = 30_000;
+let _scanShared: { top: number; at: number; promise: Promise<OpportunityScan> } | null = null;
+
+export function getOpportunityScanShared(top = 4): Promise<OpportunityScan> {
+  const now = Date.now();
+  if (_scanShared && _scanShared.top === top && now - _scanShared.at < SCAN_SHARE_MS) {
+    return _scanShared.promise;
+  }
+  const promise = getOpportunityScan(top);
+  const entry = { top, at: now, promise };
+  _scanShared = entry;
+  promise.catch(() => {
+    // Drop a failed scan so it isn't served from the share cache.
+    if (_scanShared === entry) _scanShared = null;
+  });
+  return promise;
 }
 
 export function getAccount(): Promise<AccountInfo> {

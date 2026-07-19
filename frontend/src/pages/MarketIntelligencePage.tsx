@@ -8,7 +8,7 @@ import WorkflowBar from "../components/trade/WorkflowBar";
 import { catalysts } from "../mockMarketData";
 import { marketWideBehavioralAnalysis } from "../mockBehavioralData";
 import {
-  getOpportunityScan,
+  getOpportunityScanShared,
   getQuotes,
   getSectors,
   type OpportunityScore,
@@ -68,7 +68,7 @@ export default function MarketIntelligencePage({
   const [watchlistNote, setWatchlistNote] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
-    getOpportunityScan(4)
+    getOpportunityScanShared(4)
       .then((scan) => {
         if (!alive) return;
         setWatchlist(scan.candidates);

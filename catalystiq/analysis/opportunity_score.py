@@ -352,11 +352,46 @@ def build_opportunity_score(
 # --- Orchestrator: fetch fresh data + score (used by the endpoint) ----------
 
 
-def score_symbol(symbol, provider, db, now: dt.datetime) -> OpportunityScore:
+def _resolve_sector_etf(symbol, provider, allow_fundamentals_lookup: bool) -> str | None:
+    """Resolve ``symbol``'s sector ETF WITHOUT an unconditional live fetch.
+
+    Order of preference:
+      1. Governed static sector data (covers the curated scan universe) - no
+         network at all.
+      2. Only if not governed AND ``allow_fundamentals_lookup`` is set: the
+         governed *cache* (TTL + single-flight + concurrency limit + rate-limit
+         cooldown). The scan passes False, so a scan NEVER fetches fundamentals.
+
+    Returns None (sector unavailable) rather than inventing one - the caller
+    then records the market/sector factor as insufficient_data."""
+    from catalystiq.analysis.sectors import governed_sector_etf
+    from catalystiq.providers.market_data import MarketDataError
+
+    etf = governed_sector_etf(symbol)
+    if etf is not None:
+        return etf
+    if not allow_fundamentals_lookup:
+        return None
+    from catalystiq.providers.fundamentals_cache import get_fundamentals_cached
+
+    try:
+        sector_name = get_fundamentals_cached(provider, symbol).sector
+    except MarketDataError:
+        return None
+    return SECTOR_ETF_MAP.get(sector_name) if sector_name else None
+
+
+def score_symbol(
+    symbol, provider, db, now: dt.datetime, *, allow_fundamentals_lookup: bool = True
+) -> OpportunityScore:
     """Ensure fresh Silver for the symbol, its market benchmark, and its sector
     ETF, then compute the score. Market/sector fetch failures degrade to an
     unavailable market/sector factor (-> insufficient_data in v1), never a crash.
-    A primary-symbol data failure propagates as MarketDataError to the caller."""
+    A primary-symbol data failure propagates as MarketDataError to the caller.
+
+    Sector is resolved via governed data (or, only when
+    ``allow_fundamentals_lookup`` is set, a governed cached fundamentals
+    lookup) - never an unconditional per-symbol Yahoo `.info` call."""
     from catalystiq.pipelines.market_price_pipeline import (
         ensure_fresh,
         get_silver_bars,
@@ -375,14 +410,9 @@ def score_symbol(symbol, provider, db, now: dt.datetime) -> OpportunityScore:
     except MarketDataError:
         market_bars = None
 
-    # Resolve the sector ETF from the security's fundamentals sector.
-    sector_symbol: str | None = None
+    # Resolve the sector ETF WITHOUT an unconditional fundamentals fetch.
+    sector_symbol = _resolve_sector_etf(symbol, provider, allow_fundamentals_lookup)
     sector_bars: list[OHLCVBar] | None = None
-    try:
-        sector_name = provider.get_fundamentals(symbol).sector
-        sector_symbol = SECTOR_ETF_MAP.get(sector_name) if sector_name else None
-    except MarketDataError:
-        sector_symbol = None
     if sector_symbol:
         try:
             ensure_fresh(sector_symbol, provider, db)
@@ -421,7 +451,11 @@ def scan_universe(provider, db, now: dt.datetime, top: int = 4, universe=None) -
     eligible: list[OpportunityScore] = []
     for symbol in symbols:
         try:
-            result = score_symbol(symbol, provider, db, now)
+            # allow_fundamentals_lookup=False: the scan resolves sector from
+            # governed data only and never issues a per-symbol Yahoo `.info`
+            # call. A symbol with no governed sector degrades to
+            # insufficient_data (skipped below), never a fabricated sector.
+            result = score_symbol(symbol, provider, db, now, allow_fundamentals_lookup=False)
         except MarketDataError:
             continue  # unfetchable -> skip, never mock-fill
         if result.status == "available" and result.score is not None:

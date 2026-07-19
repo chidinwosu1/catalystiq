@@ -162,6 +162,22 @@ class Settings(BaseSettings):
     # silently replaced.
     market_data_fallback_enabled: bool = False
 
+    # --- Fundamentals fetch governance -------------------------------------
+    # Fundamentals (Yahoo `.info`) are slow-changing and the endpoint is
+    # aggressively per-IP rate limited, so every fundamentals fetch goes
+    # through a governed cache (catalystiq/providers/fundamentals_cache.py):
+    # a long TTL cache, single-flight de-duplication of identical in-flight
+    # calls, a per-provider concurrency limit, and a circuit-breaker cooldown
+    # that fails fast after repeated 429s instead of hammering a throttled
+    # endpoint. All four are configurable; the defaults are conservative.
+    fundamentals_cache_ttl_seconds: int = 6 * 60 * 60  # 6 hours
+    fundamentals_max_concurrency: int = 2
+    # Consecutive rate-limited (429) fetches that trip the cooldown, and how
+    # long the cooldown lasts (fail-fast, no provider calls) before a single
+    # trial is allowed again.
+    fundamentals_rate_limit_threshold: int = 3
+    fundamentals_rate_limit_cooldown_seconds: int = 300  # 5 minutes
+
     # Storage. Defaults to a local SQLite file so the app runs without
     # infrastructure in dev; point DATABASE_URL at Postgres in production
     # per the target architecture (§1.1 / §7 of the build spec).

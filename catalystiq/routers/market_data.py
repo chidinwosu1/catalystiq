@@ -159,8 +159,14 @@ def get_sectors(provider: MarketDataProvider = Depends(get_market_data_provider)
 def get_fundamentals(
     symbol: str, provider: MarketDataProvider = Depends(get_market_data_provider)
 ):
+    # Governed cache: TTL + single-flight de-dup + concurrency limit + rate-
+    # limit cooldown, so a burst (portfolio sector exposure, repeated ticker
+    # lookups) can't melt down the Yahoo endpoint. Fundamentals never block a
+    # quote - see get_quote above, which is a separate provider call.
+    from catalystiq.providers.fundamentals_cache import get_fundamentals_cached
+
     try:
-        return provider.get_fundamentals(symbol)
+        return get_fundamentals_cached(provider, symbol)
     except MarketDataError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
