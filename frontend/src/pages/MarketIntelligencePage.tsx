@@ -34,7 +34,7 @@ const MARKET_OVERVIEW: { label: string; symbol: string; pct?: boolean }[] = [
 interface MarketIntelligencePageProps {
   onTrade: (symbol: string) => void;
   onViewAnalysis: (symbol: string) => void;
-  onNavigate: (page: PageId) => void;
+  onNavigate?: (page: PageId) => void;
 }
 
 function pctText(v: number | null): string {
@@ -121,7 +121,7 @@ export default function MarketIntelligencePage({
 
   return (
     <div className="space-y-6">
-      <WorkflowBar current={1} onNavigate={onNavigate} />
+      {onNavigate && <WorkflowBar current={1} onNavigate={onNavigate} />}
       <NextAction
         step="Next step · Research a candidate"
         prompt={`${topName} tops today's watchlist. Dig into the full research before you commit capital.`}

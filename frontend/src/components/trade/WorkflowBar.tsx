@@ -9,7 +9,6 @@ import type { PageId } from "../../types/nav";
  */
 const WORKFLOW_STEPS: { label: string; page: PageId }[] = [
   { label: "Define preferences", page: "preferences" },
-  { label: "Scan the market", page: "markets" },
   { label: "Review opportunities", page: "trade" },
   { label: "Build strategy", page: "analysis" },
   { label: "Confirm trade", page: "ticket" },

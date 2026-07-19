@@ -115,7 +115,7 @@ export default function PortfolioPage({
 
   return (
     <div className="space-y-6">
-      <WorkflowBar current={5} onNavigate={onNavigate} />
+      <WorkflowBar current={4} onNavigate={onNavigate} />
       <NextAction
         step="Next step · Review your process"
         prompt="Close the loop — review your trade journal and performance analytics to see if you're following a profitable process."
