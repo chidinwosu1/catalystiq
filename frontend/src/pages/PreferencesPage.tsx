@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { ArrowRight, Check } from "lucide-react";
 import WorkflowBar from "../components/trade/WorkflowBar";
-import { usePreferences } from "../lib/preferences";
+import { usePreferences, type Preferences } from "../lib/preferences";
 import type { PageId } from "../types/nav";
 
 interface PreferencesPageProps {
@@ -92,28 +92,38 @@ function Segment<T extends string>({
 }
 
 export default function PreferencesPage({ onNavigate }: PreferencesPageProps) {
-  // Shared, app-wide preferences so these values stay in sync everywhere they
-  // are referenced (Investment Strategy sizing, the ticket, etc.).
+  // Preferences are edited as a local draft and only applied app-wide when the
+  // user hits Submit — that's what "tells the system" the new preferences are
+  // in effect, after which every downstream page reflects them.
   const { prefs, update } = usePreferences();
-  const [saved, setSaved] = useState(false);
+  const [draft, setDraft] = useState<Preferences>(prefs);
 
-  const style = prefs.style;
-  const risk = prefs.risk;
-  const direction = prefs.direction;
-  const amount = String(prefs.amount);
-  const maxLoss = String(prefs.maxLossPct);
-  const assets = prefs.assets;
-  const constraints = prefs.constraints;
+  const style = draft.style;
+  const risk = draft.risk;
+  const direction = draft.direction;
+  const amount = String(draft.amount);
+  const maxLoss = String(draft.maxLossPct);
+  const assets = draft.assets;
+  const constraints = draft.constraints;
 
-  const setStyle = (v: Style) => update({ style: v });
-  const setRisk = (v: Risk) => update({ risk: v });
-  const setDirection = (v: Direction) => update({ direction: v });
-  const setAmount = (v: string) => update({ amount: Number(v) || 0 });
-  const setMaxLoss = (v: string) => update({ maxLossPct: Number(v) || 0 });
-  const setConstraints = (v: string) => update({ constraints: v });
+  const setStyle = (v: Style) => setDraft((d) => ({ ...d, style: v }));
+  const setRisk = (v: Risk) => setDraft((d) => ({ ...d, risk: v }));
+  const setDirection = (v: Direction) => setDraft((d) => ({ ...d, direction: v }));
+  const setAmount = (v: string) => setDraft((d) => ({ ...d, amount: Number(v) || 0 }));
+  const setMaxLoss = (v: string) => setDraft((d) => ({ ...d, maxLossPct: Number(v) || 0 }));
+  const setConstraints = (v: string) => setDraft((d) => ({ ...d, constraints: v }));
 
   function toggleAsset(a: string) {
-    update({ assets: assets.includes(a) ? assets.filter((x) => x !== a) : [...assets, a] });
+    setDraft((d) => ({
+      ...d,
+      assets: d.assets.includes(a) ? d.assets.filter((x) => x !== a) : [...d.assets, a],
+    }));
+  }
+
+  // Apply the draft to the shared store and move to Review opportunities.
+  function submitPreferences() {
+    update(draft);
+    onNavigate("trade");
   }
 
   return (
@@ -123,29 +133,19 @@ export default function PreferencesPage({ onNavigate }: PreferencesPageProps) {
       <div className="mb-6 flex flex-col items-center gap-3 rounded-2xl border border-brand-blue/25 bg-gradient-to-r from-brand-blue/10 to-transparent p-4 sm:flex-row sm:justify-between">
         <div>
           <p className="text-[13px] font-semibold uppercase tracking-wide text-[#5ea8ff]">
-            Next step · Scan the market
+            Next step · Review opportunities
           </p>
           <p className="mt-0.5 text-[14px] text-ink-secondary">
-            {saved
-              ? "Preferences saved. Read today's market before you pick a name."
-              : "Set your preferences below, then read today's market read."}
+            Set your preferences below, then submit to see opportunities matched to them.
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2.5">
-          <button
-            onClick={() => setSaved(true)}
-            className="rounded-xl border border-border-strong px-4 py-2.5 text-[13px] font-semibold text-ink-secondary transition-colors hover:text-ink-primary"
-          >
-            {saved ? "Saved ✓" : "Save preferences"}
-          </button>
-          <button
-            onClick={() => onNavigate("markets")}
-            className="inline-flex items-center gap-2 rounded-xl bg-brand-blue px-5 py-2.5 text-[13px] font-semibold text-white transition-transform hover:-translate-y-0.5"
-          >
-            Scan the Market
-            <ArrowRight size={16} />
-          </button>
-        </div>
+        <button
+          onClick={submitPreferences}
+          className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-brand-blue px-5 py-2.5 text-[13px] font-semibold text-white transition-transform hover:-translate-y-0.5"
+        >
+          Review Opportunities
+          <ArrowRight size={16} />
+        </button>
       </div>
 
       <div className="mb-5">
@@ -270,6 +270,21 @@ export default function PreferencesPage({ onNavigate }: PreferencesPageProps) {
             className="w-full rounded-xl border border-border bg-surface px-3.5 py-2.5 text-[14px] text-ink-primary placeholder:text-ink-muted focus:border-brand-blue/50 focus:outline-none"
           />
         </Card>
+      </div>
+
+      {/* Submit — applies the draft app-wide, then goes to Review opportunities */}
+      <div className="mt-6 flex flex-col items-center gap-3 rounded-2xl border border-border bg-surface p-4 sm:flex-row sm:justify-between">
+        <p className="text-[13px] text-ink-secondary">
+          Submitting applies these preferences across the app — opportunities, strategy, and risk
+          all update to match.
+        </p>
+        <button
+          onClick={submitPreferences}
+          className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-brand-blue px-6 py-2.5 text-[14px] font-semibold text-white transition-transform hover:-translate-y-0.5"
+        >
+          Submit preferences
+          <ArrowRight size={16} />
+        </button>
       </div>
     </div>
   );

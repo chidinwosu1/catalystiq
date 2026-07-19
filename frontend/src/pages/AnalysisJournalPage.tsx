@@ -266,7 +266,7 @@ export default function AnalysisJournalPage({
 
   return (
     <div className="space-y-6">
-      <WorkflowBar current={3} onNavigate={onNavigate} />
+      <WorkflowBar current={2} onNavigate={onNavigate} />
 
       <label className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink-muted focus-within:border-brand-blue/50">
         <Search size={15} />
