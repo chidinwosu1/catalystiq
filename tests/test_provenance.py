@@ -49,13 +49,23 @@ def test_canonical_provider():
 
 
 def test_quality_status_mapping():
-    assert data_quality_status_from_validation("clean") is DataQualityStatus.VALID
-    assert data_quality_status_from_validation("clean_with_warnings") is DataQualityStatus.WARNING
-    assert data_quality_status_from_validation("quarantined") is DataQualityStatus.QUARANTINED
-    assert data_quality_status_from_validation("insufficient_data") is DataQualityStatus.INSUFFICIENT
-    # Unknown -> conservative WARNING, never silently VALID.
-    assert data_quality_status_from_validation("wat") is DataQualityStatus.WARNING
-    assert data_quality_status_from_validation(None) is DataQualityStatus.WARNING
+    assert data_quality_status_from_validation("clean") is DataQualityStatus.OK
+    # clean_with_warnings -> OK (usable); the warning reason stays in the row's
+    # data_quality_warnings JSON, so nothing is discarded.
+    assert data_quality_status_from_validation("clean_with_warnings") is DataQualityStatus.OK
+    assert data_quality_status_from_validation("quarantined") is DataQualityStatus.INVALID
+    assert data_quality_status_from_validation("insufficient_data") is DataQualityStatus.MISSING
+    # Unknown / empty -> FAIL CLOSED to INVALID, never silently OK.
+    assert data_quality_status_from_validation("wat") is DataQualityStatus.INVALID
+    assert data_quality_status_from_validation(None) is DataQualityStatus.INVALID
+
+
+def test_quality_enum_matches_ml_feature_contract():
+    # The provenance enum must stay value-identical to the ML feature contract's
+    # DataQualityStatus so a provenance record and an ML feature share literals.
+    from catalystiq.ml.features.schema import DataQualityStatus as MlDataQualityStatus
+
+    assert {s.value for s in DataQualityStatus} == {s.value for s in MlDataQualityStatus}
 
 
 # --- dynamic freshness -------------------------------------------------
@@ -98,7 +108,7 @@ def test_freshness_is_recomputed_not_persisted():
     prov = PointInTimeProvenance(
         source_provider="bls", source_event_timestamp=_d(2026, 7, 1),
         available_at_timestamp=_d(2026, 7, 1), retrieved_at_timestamp=_d(2026, 7, 1),
-        data_quality_status=DataQualityStatus.VALID, frequency="monthly",
+        data_quality_status=DataQualityStatus.OK, frequency="monthly",
     )
     assert prov.freshness(now=_d(2026, 7, 20)) is Freshness.CURRENT
     assert prov.freshness(now=_d(2026, 12, 1)) is Freshness.STALE
@@ -157,7 +167,7 @@ def test_projection_from_silver_reconciles_columns():
     # source_available_at is null -> falls back to retrieved (we couldn't have
     # known it earlier), preserving available_at <= retrieved_at.
     assert prov.available_at_timestamp == prov.retrieved_at_timestamp == _d(2026, 7, 18)
-    assert prov.data_quality_status is DataQualityStatus.WARNING
+    assert prov.data_quality_status is DataQualityStatus.OK  # clean_with_warnings -> OK
     assert prov.source_record_id == "rec-1"
     assert prov.temporal_violations() == []
 
@@ -178,7 +188,7 @@ def test_projection_from_bronze_run_for_price_bar():
     )
     assert prov.source_provider == "yahoo"
     assert prov.available_at_timestamp == prov.retrieved_at_timestamp == _d(2026, 7, 18)
-    assert prov.data_quality_status is DataQualityStatus.VALID
+    assert prov.data_quality_status is DataQualityStatus.OK
     assert prov.source_dataset == "timeseries"
     assert prov.license_policy_id == "public_domain"
     assert prov.temporal_violations() == []

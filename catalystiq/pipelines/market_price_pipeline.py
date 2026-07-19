@@ -78,6 +78,7 @@ from catalystiq.analysis.volume_liquidity import compute_volume_liquidity_snapsh
 from catalystiq.db import models
 from catalystiq.pipelines.freshness import FreshnessPolicy
 from catalystiq.providers.market_data import MarketDataError, MarketDataProvider
+from catalystiq.provenance import canonical_provider
 from catalystiq.schemas.analysis import Lineage, LineageDependency, TechnicalSnapshot
 from catalystiq.schemas.market_context import MarketContextSnapshot
 from catalystiq.schemas.market_data import OHLCVBar, Quote
@@ -150,7 +151,7 @@ def ingest_bronze(
             "interval": interval,
             "days": days,
         },
-        provider=type(provider).__name__,
+        provider=canonical_provider(type(provider).__name__),
         provider_adapter_version=getattr(provider, "ADAPTER_VERSION", None),
         provider_timezone=None,
         requested_at=now,
@@ -383,6 +384,14 @@ def build_silver(
             status = "clean_with_warnings" if bar_issues else "clean"
             remediation = [i.model_dump(mode="json") for i in bar_issues] or None
             source_run_id = bronze_row.ingestion_run_id if bronze_row else None
+            # Point-in-time availability: a daily bar for date D is knowable only
+            # after D's session close. Use end-of-day D (after the ~20:00 UTC
+            # close, before the next session) - a calendar-free, conservative
+            # floor that never claims earlier availability (no look-ahead).
+            bar_available_at = dt.datetime.combine(bar.date, dt.time(23, 59, 59))
+            # Accepted bars are OK in the ML vocabulary; any warnings are kept in
+            # remediation_actions. (Rejected bars were quarantined above.)
+            ml_quality = "ok"
 
             existing = (
                 db.query(models.SilverPriceBar)
@@ -400,7 +409,8 @@ def build_silver(
                         close=bar.close,
                         volume=bar.volume,
                         source_bronze_ingestion_run_id=source_run_id,
-                        data_quality_status=status,
+                        source_available_at=bar_available_at,
+                        data_quality_status=ml_quality,
                         remediation_actions=remediation,
                         created_at=now,
                         updated_at=now,
@@ -413,7 +423,8 @@ def build_silver(
                 existing.close = bar.close
                 existing.volume = bar.volume
                 existing.source_bronze_ingestion_run_id = source_run_id
-                existing.data_quality_status = status
+                existing.source_available_at = bar_available_at
+                existing.data_quality_status = ml_quality
                 existing.remediation_actions = remediation
                 existing.updated_at = now
 

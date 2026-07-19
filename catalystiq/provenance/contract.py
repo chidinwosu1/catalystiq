@@ -13,11 +13,16 @@ from pydantic import BaseModel
 
 
 class DataQualityStatus(str, Enum):
-    VALID = "valid"
-    WARNING = "warning"
+    """Canonical data-quality vocabulary, kept value-identical to the ML feature
+    contract (catalystiq/ml/features/schema.py::DataQualityStatus) so a provenance
+    record and an ML feature use the same literals. A cross-check test asserts
+    the two enums cannot drift. `str` values (not the names) are what compare."""
+
+    OK = "ok"
+    STALE = "stale"
+    IMPUTED = "imputed"
+    MISSING = "missing"
     INVALID = "invalid"
-    INSUFFICIENT = "insufficient"
-    QUARANTINED = "quarantined"
 
 
 class Freshness(str, Enum):
@@ -61,27 +66,36 @@ def canonical_provider(name: str | None) -> str | None:
 
 # --- data_quality_status reconciliation --------------------------------
 
+# Legacy validation_status / Gold status -> canonical ML data_quality_status.
+# clean_with_warnings maps to OK (the data is usable); the specific warning
+# reason is preserved separately in the row's data_quality_warnings JSON, so no
+# detail is discarded. The legacy validation_status column is also retained for
+# auditability. Unknown values FAIL CLOSED to INVALID.
 _VALIDATION_TO_QUALITY = {
-    "clean": DataQualityStatus.VALID,
-    "available": DataQualityStatus.VALID,
-    "valid": DataQualityStatus.VALID,
-    "clean_with_warnings": DataQualityStatus.WARNING,
-    "warning": DataQualityStatus.WARNING,
-    "insufficient_data": DataQualityStatus.INSUFFICIENT,
-    "insufficient": DataQualityStatus.INSUFFICIENT,
+    "clean": DataQualityStatus.OK,
+    "available": DataQualityStatus.OK,
+    "ok": DataQualityStatus.OK,
+    "valid": DataQualityStatus.OK,
+    "clean_with_warnings": DataQualityStatus.OK,  # warnings kept in data_quality_warnings
+    "warning": DataQualityStatus.OK,
+    "insufficient_data": DataQualityStatus.MISSING,
+    "insufficient": DataQualityStatus.MISSING,
+    "missing": DataQualityStatus.MISSING,
+    "imputed": DataQualityStatus.IMPUTED,
+    "stale": DataQualityStatus.STALE,
     "invalid": DataQualityStatus.INVALID,
-    "quarantined": DataQualityStatus.QUARANTINED,
-    "rejected": DataQualityStatus.QUARANTINED,
+    "quarantined": DataQualityStatus.INVALID,
+    "rejected": DataQualityStatus.INVALID,
 }
 
 
 def data_quality_status_from_validation(validation_status: str | None) -> DataQualityStatus:
-    """Map the legacy validation_status vocabularies (clean / clean_with_warnings
-    / available / quarantined / ...) into the shared enum. An unrecognized value
-    is treated conservatively as WARNING (never silently VALID)."""
+    """Map a legacy validation_status / Gold status into the canonical ML enum.
+    An unrecognized or empty value FAILS CLOSED to INVALID (never silently OK),
+    so an unknown provenance state can't masquerade as good data."""
     if not validation_status:
-        return DataQualityStatus.WARNING
-    return _VALIDATION_TO_QUALITY.get(validation_status.strip().lower(), DataQualityStatus.WARNING)
+        return DataQualityStatus.INVALID
+    return _VALIDATION_TO_QUALITY.get(validation_status.strip().lower(), DataQualityStatus.INVALID)
 
 
 # --- timestamp helpers -------------------------------------------------

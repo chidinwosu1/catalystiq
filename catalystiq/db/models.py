@@ -48,8 +48,20 @@ class SilverRecordMixin:
     bronze_ingestion_run_id: Mapped[int | None] = mapped_column(
         ForeignKey("bronze_ingestion_run.id"), nullable=True
     )
+    # Legacy validation vocabulary, RETAINED for auditability. The canonical
+    # point-in-time quality status is `data_quality_status` below.
     validation_status: Mapped[str] = mapped_column(String(20), default="clean")
     data_quality_warnings: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Canonical data-quality status, kept value-identical to the ML feature
+    # contract (ok|stale|imputed|missing|invalid). The warning REASON stays in
+    # data_quality_warnings, so mapping clean_with_warnings -> ok loses nothing.
+    data_quality_status: Mapped[str] = mapped_column(String(20), default="ok")
+    # Optional source identity (recorded only where a real value exists; never
+    # invented). Part of the shared point-in-time provenance contract.
+    source_dataset: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    source_series_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    license_policy_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     normalization_version: Mapped[str] = mapped_column(String(20), default="1.0.0")
     created_at: Mapped[dt.datetime] = mapped_column(DateTime)
 
@@ -362,7 +374,7 @@ class SilverCompanyFiling(Base, SilverRecordMixin):
     primary_document: Mapped[str | None] = mapped_column(String(255), nullable=True)
     primary_doc_description: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_amendment: Mapped[bool] = mapped_column(default=False)
-    source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # source_url provided by SilverRecordMixin (shared provenance identity).
 
 
 class SilverCompanyFact(Base, SilverRecordMixin):
@@ -423,7 +435,7 @@ class SilverMaterialEvent(Base, SilverRecordMixin):
     acceptance_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     items: Mapped[list | None] = mapped_column(JSON, nullable=True)
     is_amendment: Mapped[bool] = mapped_column(default=False)
-    source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # source_url provided by SilverRecordMixin (shared provenance identity).
 
 
 class SilverSecurityMaster(Base, SilverRecordMixin):
@@ -509,7 +521,10 @@ class SilverPriceBar(Base):
     source_bronze_ingestion_run_id: Mapped[int | None] = mapped_column(
         ForeignKey("bronze_ingestion_run.id"), nullable=True
     )
-    data_quality_status: Mapped[str] = mapped_column(String(20), default="clean")
+    # Canonical point-in-time provenance (market-price provider is carried on
+    # the Bronze run, canonicalized). available_at is a conservative floor.
+    source_available_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    data_quality_status: Mapped[str] = mapped_column(String(20), default="ok")
     remediation_actions: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime)
