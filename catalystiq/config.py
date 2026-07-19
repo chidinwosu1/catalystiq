@@ -133,8 +133,14 @@ class Settings(BaseSettings):
     # without it, so it's treated as required config when SEC is enabled.
     sec_user_agent: str = ""
 
-    # Optional cap on Twelve Data requests per day so the free-tier
-    # allowance isn't consumed in one run (§5). 0 => no local cap.
+    # Twelve Data plan credit limits, enforced CENTRALLY through the shared
+    # credit gate (catalystiq/providers/twelve_data_gate.py). Defaults are the
+    # Basic plan: 8 credits/minute, 800 credits/day. Requests are measured in
+    # credits (some endpoints cost more than one). See TWELVE_DATA_COMPLIANCE.md.
+    twelve_data_credits_per_minute: int = 8
+    twelve_data_credits_per_day: int = 800
+    # Optional local cap that can only LOWER the daily credit budget (never
+    # raise it). 0 => use the plan's per-day limit above.
     twelve_data_daily_request_budget: int = 0
 
     # Optional comma-separated override of the BLS series ids to track

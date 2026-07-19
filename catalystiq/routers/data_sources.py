@@ -46,6 +46,28 @@ def _health_for(source: registry.SourceDescriptor, settings: Settings, db: Sessi
     keys = _provider_keys(source.name)
     missing = registry.missing_settings(source.name, settings)
 
+    # Ephemeral sources (e.g. the compliance-isolated FRED) are never persisted,
+    # so there are no ingestion runs to report - a null "last ingest" is
+    # expected and correct, not a staleness signal.
+    if source.ephemeral:
+        return {
+            "name": source.name,
+            "domain": source.domain.value,
+            "implemented": source.implemented,
+            "enabled": registry.is_source_enabled(source.name, settings),
+            "configured": not missing,
+            "missing_settings": missing,  # names only, never values
+            "requires_api_key": source.requires_api_key,
+            "license": source.license.value,
+            "ephemeral": True,
+            "last_successful_ingestion_at": None,
+            "last_failure_category": None,
+            "last_failure_at": None,
+            "circuit_breaker": "not_tracked",
+            "data_freshness_at": None,
+            "note": "Ephemeral (no-store): fetched on demand, never persisted.",
+        }
+
     last_success = (
         db.query(func.max(models.BronzeIngestionRun.completed_at))
         .filter(
@@ -64,7 +86,7 @@ def _health_for(source: registry.SourceDescriptor, settings: Settings, db: Sessi
         .first()
     )
 
-    return {
+    health = {
         "name": source.name,
         "domain": source.domain.value,
         "implemented": source.implemented,
@@ -80,7 +102,17 @@ def _health_for(source: registry.SourceDescriptor, settings: Settings, db: Sessi
         # layer and not persisted, so it isn't reported here.
         "circuit_breaker": "not_tracked",
         "data_freshness_at": _iso(last_success),
+        "ephemeral": False,
     }
+
+    # Twelve Data enforces plan credit limits and auto-shuts-off centrally;
+    # surface that runtime state (credit usage + disabled reason) for visibility.
+    if source.name == "twelve_data":
+        from catalystiq.providers.twelve_data_gate import get_twelve_data_gate
+
+        health["runtime"] = get_twelve_data_gate().status()
+
+    return health
 
 
 @router.get("")
@@ -95,6 +127,7 @@ def list_data_sources(settings: Settings = Depends(get_settings)):
             "configured": registry.is_source_configured(s.name, settings),
             "requires_api_key": s.requires_api_key,
             "license": s.license.value,
+            "ephemeral": s.ephemeral,
         }
         for s in registry.SOURCE_REGISTRY
     ]

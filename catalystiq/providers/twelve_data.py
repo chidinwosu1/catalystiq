@@ -1,17 +1,18 @@
-"""Twelve Data provider (§5): an OPTIONAL secondary market-data source.
+"""Twelve Data provider (§5): an OPTIONAL, restricted personal-use secondary
+market-data source. See TWELVE_DATA_COMPLIANCE.md.
 
-Disabled by default (no key => not constructed). Used for cross-provider
-validation samples, development comparison, and - only when explicitly
-configured - as a Yahoo outage fallback. It NEVER silently replaces Yahoo's
-values: the comparison service (catalystiq/pipelines/comparison.py) records
-both providers' values and their difference rather than averaging or
-overwriting.
+Disabled by default (no key => not constructed). Used only for private,
+personal, non-commercial cross-provider validation. It NEVER silently replaces
+Yahoo's values, and its raw values are NOT persisted: the comparison service
+(catalystiq/pipelines/comparison.py) records only the tolerance outcome and
+provenance for a restricted provider, never the raw value or a reconstructable
+difference.
 
-Free-tier aware: a token-bucket rate limiter paces requests to the free
-plan's ~8/min, and an optional per-process request budget refuses to consume
-the whole daily allowance in one run (raises RATE_LIMITED past the budget).
-The budget is in-memory per adapter instance - a best-effort guard, not a
-persistent daily counter (documented limitation).
+Plan-limit compliance: every request routes through the process-central credit
+gate (twelve_data_gate.py), which enforces the Basic plan's 8 credits/min and
+800 credits/day with per-endpoint credit weights. The provider auto-shuts-off
+(fails closed) when the daily cap is hit or when credential/licensing
+validation fails, and stays optional so the app works with it disabled.
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ import datetime as dt
 from catalystiq.providers.base import DataDomain, ProviderErrorCategory
 from catalystiq.providers.market_data import MarketDataError, MarketDataProvider
 from catalystiq.providers.transport import HttpTransport, ProviderError, RateLimiter
+from catalystiq.providers.twelve_data_gate import TwelveDataGate, get_twelve_data_gate
 from catalystiq.schemas.market_data import (
     ExchangeInfo,
     OHLCVBar,
@@ -28,6 +30,22 @@ from catalystiq.schemas.market_data import (
 )
 
 _BASE = "https://api.twelvedata.com"
+
+# Substrings in a Twelve Data error body that mean the KEY is bad (credential
+# validation failed) -> auto-disable.
+_CREDENTIAL_HINTS = ("api key", "apikey", "invalid api", "authentication", "unauthorized")
+# Substrings that mean the DATA/endpoint needs a higher plan or extra licensing
+# (professional/exchange/redistribution) -> auto-disable (fail closed).
+_LICENSING_HINTS = (
+    "upgrade your plan",
+    "not available on your plan",
+    "requires a paid",
+    "professional",
+    "redistribut",
+    "license",
+    "permission denied",
+    "not authorized for this plan",
+)
 
 _INTERVAL_MAP = {
     "1d": "1day",
@@ -46,14 +64,17 @@ _INTERVAL_MAP = {
 
 class TwelveDataProvider(MarketDataProvider):
     PROVIDER_NAME = "twelve_data"
-    ADAPTER_VERSION = "1.0.0"
+    ADAPTER_VERSION = "2.0.0"
     DOMAIN = DataDomain.MARKET_DATA
+    # Comparison/persistence code must NOT store this provider's raw values or
+    # any reconstructable derived value (retention not yet confirmed).
+    RESTRICTED_NO_RAW_PERSIST = True
 
     def __init__(
         self,
         api_key: str,
         transport: HttpTransport | None = None,
-        request_budget: int = 0,
+        gate: TwelveDataGate | None = None,
     ) -> None:
         if not api_key:
             raise ProviderError(
@@ -62,32 +83,38 @@ class TwelveDataProvider(MarketDataProvider):
                 provider=self.PROVIDER_NAME,
             )
         self._api_key = api_key
-        self._budget = request_budget  # 0 => unlimited
-        self._used = 0
-        # Free tier: ~8 requests/minute.
+        # Central credit gate (8/min, 800/day, weighted) shared across the app.
+        self._gate = gate or get_twelve_data_gate()
+        # Free tier: ~8 requests/minute (secondary pacing; the gate is authoritative).
         self._transport = transport or HttpTransport(
             self.PROVIDER_NAME, base_url=_BASE,
             rate_limiter=RateLimiter(rate_per_sec=8 / 60, capacity=8),
         )
 
-    def _spend(self) -> None:
-        if self._budget and self._used >= self._budget:
-            raise ProviderError(
-                f"Twelve Data per-run request budget ({self._budget}) exhausted - "
-                "not consuming more of the daily allowance.",
-                category=ProviderErrorCategory.RATE_LIMITED,
-                provider=self.PROVIDER_NAME,
-            )
-        self._used += 1
-
     def _get(self, path: str, params: dict) -> dict:
-        self._spend()
+        # Central credit enforcement BEFORE the request (fails closed if a limit
+        # is hit or the provider is auto-disabled).
+        self._gate.charge_endpoint(path)
         params = {**params, "apikey": self._api_key}
-        data = self._transport.request("GET", path, params=params).raise_for_status().json()
-        # Twelve Data reports request errors in a 200 body.
+        try:
+            resp = self._transport.request("GET", path, params=params).raise_for_status()
+        except ProviderError as exc:
+            # A hard auth failure means the credential is invalid -> shut off.
+            if exc.category is ProviderErrorCategory.AUTH:
+                self._gate.disable(f"credential validation failed (HTTP {exc.status_code})")
+            raise
+        data = resp.json()
+        # Twelve Data reports request errors in a 200 body. Inspect the message
+        # to auto-disable on credential or licensing/plan failures.
         if isinstance(data, dict) and data.get("status") == "error":
+            message = str(data.get("message") or "")
+            low = message.lower()
+            if any(h in low for h in _CREDENTIAL_HINTS):
+                self._gate.disable("credential validation failed")
+            elif any(h in low for h in _LICENSING_HINTS):
+                self._gate.disable("licensing/plan restriction")
             raise ProviderError(
-                f"Twelve Data error: {data.get('message')}",
+                f"Twelve Data error: {message}",
                 category=ProviderErrorCategory.UNAVAILABLE,
                 provider=self.PROVIDER_NAME,
             )
@@ -210,8 +237,5 @@ def _parse_date(value) -> dt.date | None:
 def get_twelve_data_provider() -> TwelveDataProvider:
     from catalystiq.config import get_settings
 
-    settings = get_settings()
-    return TwelveDataProvider(
-        settings.twelve_data_api_key,
-        request_budget=settings.twelve_data_daily_request_budget,
-    )
+    # The central gate (built from settings) enforces the plan credit limits.
+    return TwelveDataProvider(get_settings().twelve_data_api_key)

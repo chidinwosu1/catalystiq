@@ -15,6 +15,7 @@ from catalystiq.routers import (
     calendar,
     data_quality,
     data_sources,
+    fred,
     fundamentals,
     macro,
     market_data,
@@ -70,6 +71,7 @@ app.include_router(market_data.router)
 app.include_router(analysis.router)
 app.include_router(calendar.router)
 app.include_router(macro.router)
+app.include_router(fred.router)
 app.include_router(fundamentals.router)
 app.include_router(regulatory.router)
 app.include_router(data_quality.router)

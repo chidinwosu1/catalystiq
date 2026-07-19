@@ -43,6 +43,11 @@ def compare_quotes(
     symbol = symbol.upper()
     primary_name = getattr(primary, "PROVIDER_NAME", type(primary).__name__)
     secondary_name = getattr(secondary, "PROVIDER_NAME", type(secondary).__name__)
+    # A restricted secondary (e.g. Twelve Data) may not have its raw value - or
+    # any reconstructable derived value - persisted. We still compute the
+    # tolerance check in memory and keep the provenance (which provider, whether
+    # it agreed), but store no number that could rebuild the price.
+    restricted = getattr(secondary, "RESTRICTED_NO_RAW_PERSIST", False)
 
     primary_value = primary_ts = None
     secondary_value = secondary_ts = None
@@ -79,7 +84,21 @@ def compare_quotes(
         reason = "neither provider returned a value"
 
     if not within:
-        reason += f"; difference {rel_diff:.3f}% exceeds tolerance {tolerance_pct}% (data-quality warning)"
+        if restricted:
+            # No numeric diff in the stored reason - it would reconstruct the value.
+            reason += "; secondary differs beyond tolerance (data-quality warning)"
+        else:
+            reason += (
+                f"; difference {rel_diff:.3f}% exceeds tolerance {tolerance_pct}% "
+                "(data-quality warning)"
+            )
+
+    # For a restricted secondary, persist the tolerance OUTCOME + provenance only
+    # - never the raw value, its timestamp, or a reconstructable difference.
+    stored_secondary_value = None if restricted else secondary_value
+    stored_secondary_ts = None if restricted else secondary_ts
+    stored_abs_diff = None if restricted else abs_diff
+    stored_rel_diff = None if restricted else rel_diff
 
     row = models.ProviderComparison(
         domain=DOMAIN,
@@ -90,10 +109,10 @@ def compare_quotes(
         primary_value=primary_value,
         primary_timestamp=primary_ts,
         secondary_provider=secondary_name,
-        secondary_value=secondary_value,
-        secondary_timestamp=secondary_ts,
-        absolute_diff=abs_diff,
-        relative_diff_pct=rel_diff,
+        secondary_value=stored_secondary_value,
+        secondary_timestamp=stored_secondary_ts,
+        absolute_diff=stored_abs_diff,
+        relative_diff_pct=stored_rel_diff,
         tolerance_pct=tolerance_pct,
         within_tolerance=within,
         selected_provider=selected_provider,
