@@ -3,6 +3,15 @@
 Status: **diagnosis only — no behavior changed.** This document traces the error
 to its exact source with code references before any fix is proposed.
 
+> **Reproduces for _every_ ticker, not just NVDA.** NVDA is just the symbol in the
+> reported message. Confirmed behavior: entering *any* stock returns the same
+> `Too Many Requests. Rate limited` error. This is the signature of a **per‑IP
+> upstream throttle**, not a per‑symbol or bad‑data issue — once Yahoo throttles
+> the egress IP, *every* subsequent `.info` call fails regardless of ticker until
+> the throttle window clears. A symbol‑specific or parsing bug would fail only
+> some tickers; failing all of them points squarely at the shared Yahoo/`yfinance`
+> path and the shared egress IP. See §4 and §5.
+
 ---
 
 ## TL;DR (exact root cause)
@@ -168,7 +177,7 @@ it is one of the most frequently requested symbols in the app.
 
 | Candidate source | Verdict | Evidence |
 |---|---|---|
-| **Upstream provider (Yahoo)** | **✅ This is it** | Message `Too Many Requests. Rate limited` is `yfinance`'s `YFRateLimitError` text for a Yahoo `quoteSummary` **429**; `market_data_provider` defaults to `"yahoo"` (`config.py:97`). |
+| **Upstream provider (Yahoo)** | **✅ This is it** | Message `Too Many Requests. Rate limited` is `yfinance`'s `YFRateLimitError` text for a Yahoo `quoteSummary` **429**; `market_data_provider` defaults to `"yahoo"` (`config.py:97`). **Every ticker fails, not just NVDA** — a per‑IP throttle on the shared Yahoo path, not a per‑symbol fault. |
 | Our API (FastAPI) | ❌ Ruled out | No rate limiter on these routes; our layer only *re‑wraps* the upstream 429 as a 502. (`routers/auth.py:7` even notes login has no rate limiter — we don't emit 429s here.) |
 | Render / shared egress | ⚠️ Aggravator, not the emitter | Render does not inject a 429 with this body. But the free plan runs a **single instance behind a shared datacenter egress IP**; Yahoo throttles **per IP** and treats datacenter IPs far more harshly than residential ones, so the same call volume trips the limit sooner in prod than locally. It worsens the problem; it does not *cause* the message. |
 | **Our own throttling** | ❌ Ruled out (and part of the problem) | The token‑bucket `RateLimiter` + `CircuitBreaker` in `transport.py` are wired only to the REST adapters (SEC/FRED/etc.). `YahooFinanceProvider` uses `yfinance`'s own HTTP and **never touches `HttpTransport`** — confirmed by the module docstring at `transport.py:4‑8`. So Yahoo calls have **no** client‑side pacing at all. |
