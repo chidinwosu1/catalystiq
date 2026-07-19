@@ -182,6 +182,70 @@ class Settings(BaseSettings):
     reference_validation_sample_rate: float = 0.05
     reference_validation_interval_seconds: int = 300
 
+    # --- Machine-learning foundation (three-model + ranker system) --------
+    # The entire ML subsystem is OFF by default and every gate below FAILS
+    # CLOSED: a missing, invalid or falsey flag means "not permitted", never
+    # "assume enabled". No user-facing prediction is ever served unless
+    # ENABLE_ML *and* the specific stage flag are true AND an approved model
+    # artifact exists for the requested family/direction/horizon
+    # (see catalystiq/ml/flags.py, which is the single decision point).
+    #
+    # `enable_ml` is the master switch - if it is false, training, inference
+    # and ranking are all refused regardless of their individual flags.
+    enable_ml: bool = False
+    # Offline pipeline: building datasets, fitting and evaluating candidate
+    # artifacts. Never touches a user request path.
+    enable_ml_training: bool = False
+    # Online pipeline: assembling the unified inference contract for a
+    # symbol. Even when true, it returns `not_available` unless approved
+    # artifacts exist (see ml_require_approved_models).
+    enable_ml_inference: bool = False
+    # Model 4 cross-sectional opportunity ranking (replaces the hard-coded
+    # opportunity list). Requires approved Model 1-3 artifacts as well.
+    enable_ml_ranking: bool = False
+
+    # Hard requirement that only registry artifacts with
+    # approval_status='approved' may serve user-facing predictions. This is
+    # a safety rail and stays TRUE by default; setting it false is only for
+    # controlled offline experiments and is itself gated by enable_ml.
+    ml_require_approved_models: bool = True
+    ml_ranker_require_approved_model: bool = True
+
+    # Licensing gates for feature sourcing (compliance). FRED-derived values
+    # are REJECTED from ML features outright (see FRED_COMPLIANCE.md); this
+    # flag exists only so the rejection is explicit and testable and cannot
+    # be flipped on by accident - it defaults false and the feature schema
+    # blocks FRED regardless (defense in depth). Twelve Data may not enter
+    # training unless a separate licensing flag confirms storage + ML use
+    # are permitted (see TWELVE_DATA_COMPLIANCE.md).
+    ml_allow_fred_features: bool = False
+    ml_allow_twelve_data_training: bool = False
+
+    # Model 4 display controls. At most this many names may appear in the
+    # "Highest Conviction" section; the broader opportunity table cap is
+    # separate and larger. Both are configurable, never hard-coded in the UI.
+    ml_ranker_max_highest_conviction: int = 4
+    ml_ranker_max_opportunity_table: int = 25
+    # Demo/synthetic data may back UNIT TESTS only, never a user-facing
+    # artifact - this stays false and inference refuses to serve any artifact
+    # whose training_data_version is marked synthetic.
+    ml_ranker_allow_demo_data: bool = False
+
+    # --- Model 5: Aggregate Investor Functional Response ------------------
+    # Separate, independently-gated family backing the Investor Functional
+    # Behavior Analysis section. It analyzes AGGREGATE market behavior only
+    # (never an individual investor's psychology) and never alters Models
+    # 1-4 outputs. All flags default false and fail closed, mirroring the
+    # core ML gates above. This family is enabled only when ENABLE_ML is also
+    # true (see catalystiq/ml/flags.py behavior_* helpers).
+    enable_aggregate_behavior_model: bool = False
+    enable_behavior_model_training: bool = False
+    enable_behavior_model_inference: bool = False
+    behavior_model_allow_fred: bool = False
+    behavior_model_allow_twelve_data_training: bool = False
+    behavior_model_require_approved_artifact: bool = True
+    behavior_model_allow_demo_data: bool = False
+
 
 class ConfigurationError(RuntimeError):
     """Raised at startup when an enabled data source is missing required

@@ -12,6 +12,8 @@ httpx  # shared HTTP transport for network-backed provider adapters (catalystiq/
 pandas
 pandas_market_calendars
 scipy
+numpy  # ML foundation: labels, splitter, calibration, metrics (catalystiq/ml/)
+scikit-learn  # ML foundation training pipelines (imported lazily; catalystiq/ml/models/)
 TA-Lib==0.7.1  # pinned - reference-calculation adapter (catalystiq/validation/reference/)
 
 # dev / test

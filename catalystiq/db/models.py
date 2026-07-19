@@ -1048,3 +1048,59 @@ class Report(Base):
     neutral_pct: Mapped[float] = mapped_column(Float)
     bearish_pct: Mapped[float] = mapped_column(Float)
     report_json: Mapped[dict] = mapped_column(JSON)
+
+
+class MLModelArtifact(Base):
+    """Registry of every candidate and approved ML model artifact (ML build
+    spec). ONLY rows with approval_status='approved' may serve user-facing
+    predictions - the inference layer enforces that. An artifact records its
+    full training/validation/calibration/holdout window boundaries, the
+    schema/target/data versions it was built against, the code commit, its
+    hyperparameters and its evaluation + calibration metrics, so any served
+    prediction is fully reproducible and auditable.
+
+    Nothing writes approval_status='approved' automatically - approval is a
+    deliberate, human, out-of-band action. A row whose training_data_version
+    is marked synthetic must never be approved for user-facing use."""
+
+    __tablename__ = "ml_model_artifact"
+    __table_args__ = (
+        UniqueConstraint("model_name", "model_version", name="uq_ml_model_name_version"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    model_name: Mapped[str] = mapped_column(String(120), index=True)
+    model_version: Mapped[str] = mapped_column(String(40))
+    # model_1 | model_2 | model_3 | model_4 | model_5
+    model_family: Mapped[str] = mapped_column(String(30), index=True)
+    horizon_days: Mapped[int] = mapped_column(Integer, index=True)
+    trade_direction: Mapped[str] = mapped_column(String(10), index=True)  # long | short
+
+    training_start: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    training_end: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    validation_start: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    validation_end: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    calibration_start: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    calibration_end: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    holdout_start: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    holdout_end: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+
+    feature_schema_version: Mapped[str] = mapped_column(String(40))
+    target_definition_version: Mapped[str] = mapped_column(String(40))
+    training_data_version: Mapped[str] = mapped_column(String(80))
+    code_commit: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+    hyperparameters: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    evaluation_metrics: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    calibration_metrics: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    # candidate | approved | rejected | archived. Defaults to candidate - an
+    # artifact is NEVER born approved.
+    approval_status: Mapped[str] = mapped_column(String(20), default="candidate", index=True)
+    # True when built on synthetic/demo data (unit tests). Such a row must
+    # never be approved for user-facing predictions.
+    is_synthetic: Mapped[bool] = mapped_column(default=False)
+    # Optional path/URI to the serialized model object (out-of-band storage).
+    artifact_uri: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    notes: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime)

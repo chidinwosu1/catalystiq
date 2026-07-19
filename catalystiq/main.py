@@ -19,6 +19,7 @@ from catalystiq.routers import (
     fundamentals,
     macro,
     market_data,
+    ml,
     regulatory,
 )
 from catalystiq.scheduler import scheduler_loop
@@ -76,6 +77,7 @@ app.include_router(fundamentals.router)
 app.include_router(regulatory.router)
 app.include_router(data_quality.router)
 app.include_router(data_sources.router)
+app.include_router(ml.router)
 
 
 @app.exception_handler(BrokerError)
