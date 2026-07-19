@@ -86,7 +86,7 @@ def _health_for(source: registry.SourceDescriptor, settings: Settings, db: Sessi
         .first()
     )
 
-    return {
+    health = {
         "name": source.name,
         "domain": source.domain.value,
         "implemented": source.implemented,
@@ -104,6 +104,15 @@ def _health_for(source: registry.SourceDescriptor, settings: Settings, db: Sessi
         "data_freshness_at": _iso(last_success),
         "ephemeral": False,
     }
+
+    # Twelve Data enforces plan credit limits and auto-shuts-off centrally;
+    # surface that runtime state (credit usage + disabled reason) for visibility.
+    if source.name == "twelve_data":
+        from catalystiq.providers.twelve_data_gate import get_twelve_data_gate
+
+        health["runtime"] = get_twelve_data_gate().status()
+
+    return health
 
 
 @router.get("")

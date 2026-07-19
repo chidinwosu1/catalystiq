@@ -264,15 +264,19 @@ primary), **Twelve Data** (optional secondary / validation, off by default),
 + **BLS** + **BEA** (macro), **SEC EDGAR** (fundamentals), and **FINRA** +
 **Nasdaq Trader** (regulatory).
 
-**Cross-provider validation (§5, §16).** When Twelve Data is enabled, a
-comparison sample fetches the same quote from Yahoo (primary) and Twelve Data
-(secondary) and records a `provider_comparison` row: both values, their
-difference, whether it's within tolerance, and which was selected and why.
-Values are never averaged and the secondary never silently overwrites the
-primary; a difference beyond `PROVIDER_COMPARISON_TOLERANCE_PCT` is flagged.
+**Cross-provider validation (§5, §16).** When Twelve Data is enabled, the
+compare endpoint fetches the same quote from Yahoo (primary) and Twelve Data
+(secondary) and records a `provider_comparison` row. Values are never averaged
+and the secondary never silently overwrites the primary.
 `POST /data-quality/market_data/compare/{symbol}`, `GET /data-quality/{domain}`.
-A configured-only Yahoo-outage fallback (`MARKET_DATA_FALLBACK_ENABLED`) is
-available; the primary is never pre-emptively replaced.
+
+**Twelve Data is restricted personal-use (compliance).** It is optional and off
+by default. Its plan credit limits (8/min, 800/day, Basic) are enforced
+centrally with per-endpoint credit weights; it auto-shuts-off on the daily cap
+or on credential/licensing failure; and its **raw values are never persisted** —
+the comparison record keeps only the within/outside-tolerance outcome and
+provenance, never a value or reconstructable difference. It never feeds any
+model, score, or backtest. See **`TWELVE_DATA_COMPLIANCE.md`**.
 
 **Order submission is disabled by default (§13).** Paper and live are
 separate flags with separate credentials; **live is refused until separately

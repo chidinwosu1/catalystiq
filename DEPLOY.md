@@ -96,7 +96,7 @@ fail startup, so set the flag **and** its key together.
 | FRED (ephemeral macro panel) | `ENABLE_FRED=true`, `FRED_API_KEY=…` — isolated, no-store, allowlisted public-domain series only; see [`FRED_COMPLIANCE.md`](./FRED_COMPLIANCE.md) |
 | BLS | `ENABLE_BLS=true`, `BLS_API_KEY=…` |
 | BEA | `ENABLE_BEA=true`, `BEA_API_KEY=…` |
-| Twelve Data | `ENABLE_TWELVE_DATA=true`, `TWELVE_DATA_API_KEY=…` |
+| Twelve Data (restricted personal-use) | `ENABLE_TWELVE_DATA=true`, `TWELVE_DATA_API_KEY=…` — central credit limits, auto-shutoff, no raw-value persistence; single-user only; see [`TWELVE_DATA_COMPLIANCE.md`](./TWELVE_DATA_COMPLIANCE.md) |
 | FINRA, Nasdaq Trader | *(enabled by default; keyless)* |
 | Webull (READ-ONLY) | `ENABLE_WEBULL=true`, `WEBULL_APP_KEY/SECRET/ACCOUNT_ID` |
 

@@ -1,15 +1,17 @@
-"""Twelve Data adapter (offline) + cross-provider comparison: values recorded
-and differenced, never averaged; configured-only fallback; request budget."""
+"""Twelve Data adapter (offline) + cross-provider comparison: tolerance recorded,
+never averaged; configured-only fallback; central credit gate. Compliance-
+specific behaviors (no raw persistence, auto-shutoff, limits) are in
+tests/test_twelve_data_compliance.py."""
 import datetime as dt
 
 import pytest
 
-from catalystiq.db import models
 from catalystiq.pipelines import comparison as cmp
 from catalystiq.providers.base import ProviderError, ProviderErrorCategory
 from catalystiq.providers.market_data import MarketDataError, MarketDataProvider
 from catalystiq.providers.transport import HttpResponse
 from catalystiq.providers.twelve_data import TwelveDataProvider
+from catalystiq.providers.twelve_data_gate import TwelveDataGate
 from catalystiq.schemas.market_data import OHLCVBar, Quote
 
 
@@ -34,8 +36,11 @@ _TS = """{"status":"ok","values":[
 _ERR = '{"status":"error","message":"invalid symbol","code":400}'
 
 
-def _provider(routes, budget=0):
-    return TwelveDataProvider("k", transport=FakeTransport(routes), request_budget=budget)
+def _provider(routes, gate=None):
+    # A fresh gate per provider so tests never touch the process singleton.
+    return TwelveDataProvider(
+        "k", transport=FakeTransport(routes), gate=gate or TwelveDataGate()
+    )
 
 
 def test_requires_key():
@@ -61,8 +66,9 @@ def test_error_body_raises():
     assert exc.value.category is ProviderErrorCategory.UNAVAILABLE
 
 
-def test_request_budget_enforced():
-    provider = _provider({"quote": (200, _QUOTE)}, budget=2)
+def test_minute_credit_limit_enforced():
+    gate = TwelveDataGate(credits_per_minute=2, credits_per_day=100)
+    provider = _provider({"quote": (200, _QUOTE)}, gate=gate)
     provider.get_quote("AAPL")
     provider.get_quote("AAPL")
     with pytest.raises(ProviderError) as exc:
@@ -105,10 +111,15 @@ class StubProvider(MarketDataProvider):
         raise MarketDataError("n/a")
 
 
-def test_comparison_records_both_values_never_averages(test_db_session):
+class RestrictedStubProvider(StubProvider):
+    # Mirrors TwelveDataProvider's no-raw-persistence contract.
+    RESTRICTED_NO_RAW_PERSIST = True
+
+
+def test_comparison_unrestricted_secondary_records_both_never_averages(test_db_session):
     db = test_db_session
     primary = StubProvider("yahoo", 100.0)
-    secondary = StubProvider("twelve_data", 100.4)
+    secondary = StubProvider("other", 100.4)  # not restricted
     row = cmp.compare_quotes("AAPL", db, primary, secondary, tolerance_pct=0.5)
     assert row.primary_value == 100.0
     assert row.secondary_value == 100.4
@@ -116,14 +127,13 @@ def test_comparison_records_both_values_never_averages(test_db_session):
     assert row.relative_diff_pct == pytest.approx(0.4, abs=1e-6)
     assert row.within_tolerance is True
     assert row.selected_provider == "yahoo"
-    # Nothing stored is the average of the two.
     assert row.primary_value != pytest.approx(100.2)
 
 
 def test_comparison_flags_out_of_tolerance(test_db_session):
     db = test_db_session
     row = cmp.compare_quotes(
-        "AAPL", db, StubProvider("yahoo", 100.0), StubProvider("twelve_data", 105.0),
+        "AAPL", db, StubProvider("yahoo", 100.0), StubProvider("other", 105.0),
         tolerance_pct=0.5,
     )
     assert row.within_tolerance is False
