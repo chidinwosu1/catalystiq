@@ -190,23 +190,23 @@ function Kicker({ children }: { children: ReactNode }) {
 function FlipTile({ offer, onLearnMore }: { offer: Offer; onLearnMore: (p: PageId) => void }) {
   const [flipped, setFlipped] = useState(false);
   const Icon = offer.icon;
-  const faceBase = "cq-face cq-glass flex flex-col rounded-2xl px-[17px] py-4";
+  const faceBase = "cq-face cq-glass flex flex-col rounded-2xl px-[17px] py-3.5";
   return (
     <div
-      className={`cq-flip cq-reveal min-h-[158px] cursor-pointer ${flipped ? "is-flipped" : ""}`}
+      className={`cq-flip cq-reveal min-h-[128px] cursor-pointer ${flipped ? "is-flipped" : ""}`}
       onClick={() => setFlipped((v) => !v)}
     >
       <div className="cq-flip-inner">
         {/* Front */}
         <div className={faceBase}>
-          <div className="mb-2.5 grid h-9 w-9 place-items-center rounded-[10px] border border-brand-blue/40 bg-brand-blue/15 text-[#5ea8ff]">
-            <Icon size={19} />
+          <div className="mb-2 grid h-8 w-8 place-items-center rounded-[10px] border border-brand-blue/40 bg-brand-blue/15 text-[#5ea8ff]">
+            <Icon size={17} />
           </div>
-          <h3 className="mb-1 text-[15.5px] font-semibold tracking-tight text-ink-primary">
+          <h3 className="mb-0.5 text-[15px] font-semibold tracking-tight text-ink-primary">
             {offer.title}
           </h3>
-          <p className="text-[13px] font-medium text-ink-primary">{offer.lead}</p>
-          <span className="mt-auto pt-2.5 text-[11.5px] text-ink-muted">Flip for more →</span>
+          <p className="text-[12.5px] font-medium text-ink-primary">{offer.lead}</p>
+          <span className="mt-auto pt-2 text-[11.5px] text-ink-muted">Flip for more →</span>
         </div>
         {/* Back */}
         <div className={`${faceBase} cq-face-back`}>
@@ -306,28 +306,29 @@ export default function HomePage({ onNavigate }: HomePageProps) {
           style={{ background: "linear-gradient(to bottom, transparent, var(--color-page))" }}
         />
         <div
-          className="relative z-[2] mx-auto max-w-3xl px-6 pb-10 pt-10 text-center"
+          className="relative z-[2] mx-auto max-w-5xl px-6 pb-5 pt-6 text-center"
           style={{ animation: "cq-fade-up 0.8s cubic-bezier(0.2,0.7,0.2,1) both" }}
         >
           <span className="cq-glass inline-flex items-center gap-2.5 rounded-full px-3.5 py-1.5 text-[12.5px] font-medium text-ink-secondary">
             <span className="cq-pulse h-1.5 w-1.5 rounded-full bg-status-good shadow-[0_0_0_4px_rgba(34,197,94,0.18)]" />
             Market intelligence · updated continuously
           </span>
-          <h1 className="mx-auto mt-3.5 max-w-[17ch] text-[clamp(30px,4.8vw,52px)] font-extrabold leading-[1.05] tracking-[-0.035em] text-balance text-ink-primary">
+          {/* One line on desktop; allowed to wrap on smaller screens so it never overflows. */}
+          <h1 className="mx-auto mt-3 text-[clamp(25px,4.2vw,44px)] font-extrabold leading-[1.08] tracking-[-0.035em] text-balance text-ink-primary lg:whitespace-nowrap">
             Stop guessing.{" "}
             <span className="bg-gradient-to-r from-[#5ea8ff] to-brand-blue bg-clip-text text-transparent">
               Start investing with evidence.
             </span>
           </h1>
-          <p className="mx-auto mt-3.5 max-w-[60ch] text-[clamp(14.5px,1.6vw,17px)] text-ink-secondary">
+          <p className="mx-auto mt-2.5 max-w-[92ch] text-[clamp(13.5px,1.4vw,15.5px)] leading-relaxed text-ink-secondary">
             Technical signals, macroeconomic data, investor psychology, and machine learning —
             combined into one investment-intelligence platform, so every opportunity is backed by
             evidence, not a single opinion.
           </p>
-          <div className="mt-7 flex justify-center">
+          <div className="mt-4 flex justify-center">
             <button
               onClick={() => onNavigate("preferences")}
-              className="inline-flex items-center gap-2.5 rounded-xl bg-brand-blue px-6 py-3 text-[15px] font-semibold text-white shadow-[0_10px_30px_rgba(57,135,229,0.32)] transition-transform hover:-translate-y-0.5"
+              className="inline-flex items-center gap-2.5 rounded-xl bg-brand-blue px-6 py-2.5 text-[15px] font-semibold text-white shadow-[0_10px_30px_rgba(57,135,229,0.32)] transition-transform hover:-translate-y-0.5"
             >
               <TrendingUp size={17} />
               Start Your Analysis
@@ -337,17 +338,19 @@ export default function HomePage({ onNavigate }: HomePageProps) {
       </header>
 
       {/* ===================== OFFERINGS — flip tiles ===================== */}
-      <section className="relative z-[2] mx-auto max-w-[1180px] px-6 pb-10 pt-2">
-        <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
+      <section className="relative z-[2] mx-auto max-w-[1180px] px-6 pb-10 pt-0">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
           <div>
             <Kicker>What Catalyst IQ offers</Kicker>
-            <h2 className={secTitle}>The whole picture, at a glance — flip any tile for more.</h2>
+            <h2 className="mt-2 text-[clamp(21px,2.5vw,29px)] font-bold leading-[1.1] tracking-[-0.025em] text-balance text-ink-primary">
+              The whole picture, at a glance — flip any tile for more.
+            </h2>
           </div>
           <span className="inline-flex items-center gap-1.5 text-[12.5px] text-ink-muted">
             <Sparkles size={14} /> Hover or tap to flip
           </span>
         </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
           {OFFERS.map((offer) => (
             <FlipTile key={offer.title} offer={offer} onLearnMore={onNavigate} />
           ))}

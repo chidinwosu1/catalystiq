@@ -28,6 +28,12 @@ function App() {
       .catch(() => setAuth("out"));
   }, []);
 
+  // Every page change starts at the top — the previous page's scroll position
+  // must never carry over.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [activePage, tradeSymbol, analysisSymbol]);
+
   async function handleSignOut() {
     try {
       await logout();
