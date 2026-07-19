@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { ArrowRight, Check } from "lucide-react";
 import WorkflowBar from "../components/trade/WorkflowBar";
+import { usePreferences } from "../lib/preferences";
 import type { PageId } from "../types/nav";
 
 interface PreferencesPageProps {
@@ -91,22 +92,61 @@ function Segment<T extends string>({
 }
 
 export default function PreferencesPage({ onNavigate }: PreferencesPageProps) {
-  const [style, setStyle] = useState<Style>("swing");
-  const [risk, setRisk] = useState<Risk>("moderate");
-  const [direction, setDirection] = useState<Direction>("long");
-  const [amount, setAmount] = useState("10000");
-  const [maxLoss, setMaxLoss] = useState("5");
-  const [assets, setAssets] = useState<string[]>(["Stocks"]);
-  const [constraints, setConstraints] = useState("");
+  // Shared, app-wide preferences so these values stay in sync everywhere they
+  // are referenced (Investment Strategy sizing, the ticket, etc.).
+  const { prefs, update } = usePreferences();
   const [saved, setSaved] = useState(false);
 
+  const style = prefs.style;
+  const risk = prefs.risk;
+  const direction = prefs.direction;
+  const amount = String(prefs.amount);
+  const maxLoss = String(prefs.maxLossPct);
+  const assets = prefs.assets;
+  const constraints = prefs.constraints;
+
+  const setStyle = (v: Style) => update({ style: v });
+  const setRisk = (v: Risk) => update({ risk: v });
+  const setDirection = (v: Direction) => update({ direction: v });
+  const setAmount = (v: string) => update({ amount: Number(v) || 0 });
+  const setMaxLoss = (v: string) => update({ maxLossPct: Number(v) || 0 });
+  const setConstraints = (v: string) => update({ constraints: v });
+
   function toggleAsset(a: string) {
-    setAssets((prev) => (prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]));
+    update({ assets: assets.includes(a) ? assets.filter((x) => x !== a) : [...assets, a] });
   }
 
   return (
     <div>
       <WorkflowBar current={0} onNavigate={onNavigate} />
+
+      <div className="mb-6 flex flex-col items-center gap-3 rounded-2xl border border-brand-blue/25 bg-gradient-to-r from-brand-blue/10 to-transparent p-4 sm:flex-row sm:justify-between">
+        <div>
+          <p className="text-[13px] font-semibold uppercase tracking-wide text-[#5ea8ff]">
+            Next step · Scan the market
+          </p>
+          <p className="mt-0.5 text-[14px] text-ink-secondary">
+            {saved
+              ? "Preferences saved. Read today's market before you pick a name."
+              : "Set your preferences below, then read today's market read."}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2.5">
+          <button
+            onClick={() => setSaved(true)}
+            className="rounded-xl border border-border-strong px-4 py-2.5 text-[13px] font-semibold text-ink-secondary transition-colors hover:text-ink-primary"
+          >
+            {saved ? "Saved ✓" : "Save preferences"}
+          </button>
+          <button
+            onClick={() => onNavigate("markets")}
+            className="inline-flex items-center gap-2 rounded-xl bg-brand-blue px-5 py-2.5 text-[13px] font-semibold text-white transition-transform hover:-translate-y-0.5"
+          >
+            Scan the Market
+            <ArrowRight size={16} />
+          </button>
+        </div>
+      </div>
 
       <div className="mb-5">
         <span className="font-mono text-xs font-semibold uppercase tracking-[0.18em] text-[#5ea8ff]">
@@ -230,34 +270,6 @@ export default function PreferencesPage({ onNavigate }: PreferencesPageProps) {
             className="w-full rounded-xl border border-border bg-surface px-3.5 py-2.5 text-[14px] text-ink-primary placeholder:text-ink-muted focus:border-brand-blue/50 focus:outline-none"
           />
         </Card>
-      </div>
-
-      <div className="mt-6 flex flex-col items-center gap-3 rounded-2xl border border-brand-blue/25 bg-gradient-to-r from-brand-blue/10 to-transparent p-4 sm:flex-row sm:justify-between">
-        <div>
-          <p className="text-[13px] font-semibold uppercase tracking-wide text-[#5ea8ff]">
-            Next step · Scan the market
-          </p>
-          <p className="mt-0.5 text-[14px] text-ink-secondary">
-            {saved
-              ? "Preferences saved. Read today's market before you pick a name."
-              : "Save your preferences, then read today's market read."}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2.5">
-          <button
-            onClick={() => setSaved(true)}
-            className="rounded-xl border border-border-strong px-4 py-2.5 text-[13px] font-semibold text-ink-secondary transition-colors hover:text-ink-primary"
-          >
-            {saved ? "Saved ✓" : "Save preferences"}
-          </button>
-          <button
-            onClick={() => onNavigate("markets")}
-            className="inline-flex items-center gap-2 rounded-xl bg-brand-blue px-5 py-2.5 text-[13px] font-semibold text-white transition-transform hover:-translate-y-0.5"
-          >
-            Scan the Market
-            <ArrowRight size={16} />
-          </button>
-        </div>
       </div>
     </div>
   );

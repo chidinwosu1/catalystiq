@@ -68,6 +68,14 @@ export default function PortfolioPage({
   return (
     <div className="space-y-6">
       <WorkflowBar current={5} onNavigate={onNavigate} />
+      <NextAction
+        step="Next step · Review your process"
+        prompt="Close the loop — review your trade journal and performance analytics to see if you're following a profitable process."
+        label="Review Journal"
+        icon={<BookOpen size={15} />}
+        onClick={() => onNavigate("analysis")}
+        secondary={{ label: "Scan the market", onClick: () => onNavigate("markets") }}
+      />
       <div>
         <h1 className="text-xl font-semibold text-ink-primary">Portfolio</h1>
         <p className="mt-1 text-sm text-ink-secondary">
@@ -208,15 +216,6 @@ export default function PortfolioPage({
           Your portfolio is heavily concentrated in large-cap technology.
         </p>
       </SectionCard>
-
-      <NextAction
-        step="Next step · Review your process"
-        prompt="Close the loop — review your trade journal and performance analytics to see if you're following a profitable process."
-        label="Review Journal"
-        icon={<BookOpen size={15} />}
-        onClick={() => onNavigate("analysis")}
-        secondary={{ label: "Scan the market", onClick: () => onNavigate("markets") }}
-      />
     </div>
   );
 }

@@ -271,7 +271,7 @@ export default function HomePage({ onNavigate }: HomePageProps) {
           </p>
           <div className="mt-7 flex justify-center">
             <button
-              onClick={() => onNavigate("analysis")}
+              onClick={() => onNavigate("preferences")}
               className="inline-flex items-center gap-2.5 rounded-xl bg-brand-blue px-6 py-3 text-[15px] font-semibold text-white shadow-[0_10px_30px_rgba(57,135,229,0.32)] transition-transform hover:-translate-y-0.5"
             >
               <TrendingUp size={17} />

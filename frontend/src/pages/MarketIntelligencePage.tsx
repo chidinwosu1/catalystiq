@@ -32,6 +32,14 @@ export default function MarketIntelligencePage({
   return (
     <div className="space-y-6">
       <WorkflowBar current={1} onNavigate={onNavigate} />
+      <NextAction
+        step="Next step · Research a candidate"
+        prompt={`${topName} tops today's watchlist. Dig into the full research before you commit capital.`}
+        label={`Research ${topName}`}
+        icon={<LineChart size={15} />}
+        onClick={() => onViewAnalysis(topName)}
+        secondary={{ label: `Trade ${topName}`, onClick: () => onTrade(topName) }}
+      />
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-ink-primary">Market Analysis</h1>
@@ -192,15 +200,6 @@ export default function MarketIntelligencePage({
           </table>
         </div>
       </SectionCard>
-
-      <NextAction
-        step="Next step · Research a candidate"
-        prompt={`${topName} tops today's watchlist. Dig into the full research before you commit capital.`}
-        label={`Research ${topName}`}
-        icon={<LineChart size={15} />}
-        onClick={() => onViewAnalysis(topName)}
-        secondary={{ label: `Trade ${topName}`, onClick: () => onTrade(topName) }}
-      />
     </div>
   );
 }

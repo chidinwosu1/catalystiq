@@ -418,6 +418,14 @@ export default function TradeTicketPage({
   return (
     <div className="mx-auto max-w-2xl space-y-5">
       <WorkflowBar current={4} onNavigate={onNavigate} />
+      <NextAction
+        step="Next step · Monitor your position"
+        prompt="Order placed? Track fills, live P/L, and risk alerts in your portfolio."
+        label="View Portfolio"
+        icon={<Briefcase size={15} />}
+        onClick={() => onNavigate("portfolio")}
+        secondary={{ label: "Scan the market", onClick: () => onNavigate("markets") }}
+      />
       <div>
         <h1 className="text-xl font-semibold text-ink-primary">Trade Ticket</h1>
         <p className="mt-1 text-sm text-ink-secondary">
@@ -1034,15 +1042,6 @@ export default function TradeTicketPage({
           </div>
         </SectionCard>
       )}
-
-      <NextAction
-        step="Next step · Monitor your position"
-        prompt="Order placed? Track fills, live P/L, and risk alerts in your portfolio."
-        label="View Portfolio"
-        icon={<Briefcase size={15} />}
-        onClick={() => onNavigate("portfolio")}
-        secondary={{ label: "Scan the market", onClick: () => onNavigate("markets") }}
-      />
     </div>
   );
 }
