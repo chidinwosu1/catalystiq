@@ -42,6 +42,22 @@ async def lifespan(app: FastAPI):
             )
         ),
     ]
+    # Keep the opportunity-scan universe warm in the background so the
+    # user-facing scan reads fresh Silver instead of doing a cold multi-fetch
+    # ingest inline (catalystiq/pipelines/universe_warmer.py).
+    if settings.enable_universe_warmer:
+        from catalystiq.pipelines.universe_warmer import universe_warm_loop
+        from catalystiq.providers.market_data import get_market_data_provider
+
+        tasks.append(
+            asyncio.create_task(
+                universe_warm_loop(
+                    SessionLocal,
+                    get_market_data_provider,
+                    settings.universe_warm_interval_seconds,
+                )
+            )
+        )
     try:
         yield
     finally:

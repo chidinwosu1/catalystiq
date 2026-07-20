@@ -178,6 +178,29 @@ class Settings(BaseSettings):
     fundamentals_rate_limit_threshold: int = 3
     fundamentals_rate_limit_cooldown_seconds: int = 300  # 5 minutes
 
+    # --- Market-data (OHLCV/quote) fetch governance ------------------------
+    # The OHLCV/quote ingest path (yfinance .history/.fast_info) is on the
+    # same throttled Yahoo endpoints and, on a cold cache, an opportunity scan
+    # ingests 5y of history for ~30 symbols sequentially. These gate the
+    # provider ingest calls (concurrency cap + a rate-limit circuit-breaker
+    # cooldown) so throttling degrades fast instead of hanging.
+    market_data_max_concurrency: int = 2
+    market_data_rate_limit_threshold: int = 3
+    market_data_rate_limit_cooldown_seconds: int = 300  # 5 minutes
+
+    # --- Opportunity-scan performance --------------------------------------
+    # Short-TTL cache for the ranked universe scan, so repeated / concurrent
+    # loads reuse one computed result instead of re-running the whole loop.
+    opportunity_scan_cache_ttl_seconds: int = 60
+
+    # Background universe warmer: keeps Silver fresh for the scan universe
+    # (+ SPY + governed sector ETFs) so the user-facing scan is warm (DB-only,
+    # sub-second) instead of paying a cold multi-fetch ingest. On by default;
+    # the interval is calendar-aware via FreshnessPolicy (a warm symbol is a
+    # no-op), so an idle app makes at most a light periodic refresh.
+    enable_universe_warmer: bool = True
+    universe_warm_interval_seconds: int = 900  # 15 minutes
+
     # Storage. Defaults to a local SQLite file so the app runs without
     # infrastructure in dev; point DATABASE_URL at Postgres in production
     # per the target architecture (§1.1 / §7 of the build spec).

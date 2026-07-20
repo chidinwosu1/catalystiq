@@ -473,3 +473,65 @@ def scan_universe(provider, db, now: dt.datetime, top: int = 4, universe=None) -
         ml=_ML_NOT_AVAILABLE,
         note=None if eligible else "No symbols currently meet the rule-based eligibility criteria.",
     )
+
+
+# --- Short-TTL scan cache ---------------------------------------------------
+# A cold scan is expensive (it may ingest history for the whole universe); a
+# warm one is still a full scoring loop. This cache lets repeated / concurrent
+# scan requests reuse one computed result within a short window. The cached
+# OpportunityScan keeps its original as_of (point-in-time), never re-stamped.
+
+import threading as _threading  # noqa: E402
+import time as _time  # noqa: E402
+from dataclasses import dataclass as _dataclass  # noqa: E402
+
+
+@_dataclass
+class _ScanCacheEntry:
+    scan: OpportunityScan
+    stored_at: float
+
+
+_SCAN_CACHE: dict[tuple, _ScanCacheEntry] = {}
+_SCAN_CACHE_LOCK = _threading.Lock()
+
+
+def clear_scan_cache() -> None:
+    """Drop cached scans. Test-support only."""
+    with _SCAN_CACHE_LOCK:
+        _SCAN_CACHE.clear()
+
+
+def scan_universe_cached(
+    provider,
+    db,
+    now: dt.datetime,
+    top: int = 4,
+    universe=None,
+    *,
+    ttl_seconds: float | None = None,
+    monotonic=_time.monotonic,
+) -> OpportunityScan:
+    """`scan_universe` with a short-TTL result cache keyed by (universe, top).
+    Within the TTL, a repeat request returns the cached scan (with its original
+    as_of) instead of re-running the loop."""
+    if ttl_seconds is None:
+        from catalystiq.config import get_settings
+
+        ttl_seconds = get_settings().opportunity_scan_cache_ttl_seconds
+
+    symbols = tuple(universe) if universe else SCAN_UNIVERSE
+    key = (symbols, max(0, min(top, _MAX_SCAN_TOP)))
+
+    if ttl_seconds > 0:
+        with _SCAN_CACHE_LOCK:
+            entry = _SCAN_CACHE.get(key)
+            if entry is not None and (monotonic() - entry.stored_at) < ttl_seconds:
+                return entry.scan
+
+    # Computed outside the lock so a slow scan doesn't block cache reads.
+    scan = scan_universe(provider, db, now, top=top, universe=universe)
+    if ttl_seconds > 0:
+        with _SCAN_CACHE_LOCK:
+            _SCAN_CACHE[key] = _ScanCacheEntry(scan=scan, stored_at=monotonic())
+    return scan
