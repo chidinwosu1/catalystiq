@@ -148,6 +148,36 @@ def test_logs_required_params_metrics_and_tags():
         assert metric in m1.metrics
     # deterministic scorer baseline logged for comparison
     assert any(k.startswith("scorer_baseline") for k in m1.metrics)
+    # per-model sliced holdout metrics (sector/regime/confidence) logged
+    assert "model_1/sliced_metrics.json" in m1.artifacts
+    assert any(k.startswith("sector.") for k in m1.metrics)
+
+    # survivorship-bias caveat is prominent at the parent run
+    assert parent.tags.get("survivorship_bias") == "True"
+    assert "survivorship_bias_warning" in parent.params
+    assert "data_source_caveats.json" in parent.artifacts
+    # regime coverage logged at the horizon
+    assert "n_market_regimes" in horizon.metrics
+    assert "regime_coverage.json" in horizon.artifacts
+
+
+def test_survivorship_and_regime_reporting():
+    report = _run()
+    assert report.data_source_caveats["survivorship_bias"] is True
+    assert "delisted" in report.data_source_caveats["survivorship_bias_warning"].lower()
+    hz = report.horizons_results[0]
+    # the seeded fixture spans 3 synthetic regimes
+    assert len([k for k in hz.regime_coverage if k != "unknown"]) == 3
+
+
+def test_single_regime_dataset_warns():
+    from catalystiq.ml.experiment import _regime_coverage
+
+    ds = build_synthetic_dataset()
+    for ex in ds.examples:
+        ex.features["market_regime"] = 1.0  # collapse to one regime
+    cov = _regime_coverage(ds)
+    assert list(cov) == ["regime_1"]
 
 
 def test_ranking_uses_out_of_fold_inputs_only():

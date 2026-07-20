@@ -25,6 +25,14 @@ databases:
     user: catalystiq
     plan: free
 
+  # Dedicated tracking store for the OFFLINE ML-validation experiment. Kept
+  # SEPARATE from the app database so MLflow's tables can never collide with
+  # the app's, and so training never touches production data. Free tier.
+  - name: catalystiq-mlflow-db
+    databaseName: mlflow
+    user: mlflow
+    plan: free
+
 services:
   # --- Backend API (FastAPI) ---------------------------------------------
   - type: web
@@ -90,3 +98,81 @@ services:
       - type: rewrite
         source: /*
         destination: /index.html
+
+  # --- MLflow dashboard (offline ML-validation results) ------------------
+  # A read-mostly web UI over the dedicated tracking database, so you can
+  # compare models/horizons/folds in a browser WITHOUT a terminal. It serves
+  # ONLY experiment metrics/params (no secrets, no PII, no app data) and runs
+  # no training and no inference.
+  #
+  # SECURITY: MLflow's UI has no built-in auth, so this service is publicly
+  # reachable at its onrender.com URL. The data is non-sensitive experiment
+  # metrics, but treat the URL as semi-private and SUSPEND this service when
+  # you're not actively viewing results. (To lock it down, run MLflow behind
+  # basic auth or a private network - see ML_VALIDATION_MLFLOW.md.)
+  #
+  # NOTE: with a database-only backend (no attached disk / object store),
+  # numeric metrics, params, tags and run structure persist and render here;
+  # plot/JSON *artifacts* are not persisted on the free tier (they also print
+  # in the training job's run logs). See the docs for adding a disk/S3.
+  - type: web
+    name: catalystiq-mlflow-ui
+    runtime: python
+    plan: free
+    rootDir: .
+    buildCommand: pip install "mlflow" "psycopg2-binary"
+    # Render hands out `postgres://`; MLflow/SQLAlchemy need `postgresql://`.
+    startCommand: >-
+      export MLFLOW_TRACKING_URI="$(printf '%s' "$MLFLOW_DB_URL" | sed 's#^postgres://#postgresql://#')" &&
+      mlflow server --backend-store-uri "$MLFLOW_TRACKING_URI" --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: MLFLOW_DB_URL
+        fromDatabase:
+          name: catalystiq-mlflow-db
+          property: connectionString
+
+  # --- One-time ML-validation training job (manual, offline, fail-closed) -
+  # A cron job you TRIGGER MANUALLY ("Trigger Run" in the Render dashboard).
+  # The schedule is intentionally rare (once a year) so it effectively never
+  # auto-runs; Render bills cron jobs per run, so a suspended/idle job costs
+  # nothing. SUSPEND or DELETE it after your run.
+  #
+  # Safety: training authorization comes ONLY from the `--enable-training`
+  # flag on the command (this process only). ENABLE_ML / ENABLE_ML_TRAINING
+  # are deliberately NOT set in the environment, so nothing is enabled by
+  # config, and no inference, serving, approval, registry promotion or order
+  # submission is possible. Silver bars are ingested into an EPHEMERAL SQLite
+  # DB (never the production database). Results log to the dedicated MLflow DB.
+  #
+  # The default universe/date range below is BOUNDED so the run completes on
+  # modest compute and within free-provider rate limits. It is a smoke-to-
+  # moderate run, NOT genuine validation (survivorship-biased; single provider;
+  # limited history). To strengthen it, edit the command to use a larger
+  # `--symbols`/`--symbols-file` list and a longer `--start`/`--end`, and use a
+  # larger instance - see ML_VALIDATION_MLFLOW.md.
+  - type: cron
+    name: catalystiq-ml-training
+    runtime: python
+    plan: starter
+    rootDir: .
+    schedule: "0 6 1 1 *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: >-
+      export MLFLOW_TRACKING_URI="$(printf '%s' "$MLFLOW_DB_URL" | sed 's#^postgres://#postgresql://#')" &&
+      python -m catalystiq.ml.train_cli
+      --symbols AAPL,MSFT,NVDA,JPM,BAC,XOM,CVX,UNH,JNJ,PG,KO,HD,CAT,BA,NEE,LIN,SPY,QQQ
+      --benchmark SPY --start 2015-01-01 --end 2024-12-31
+      --horizons 5,10 --ingest --enable-training
+      --database-url sqlite:////tmp/catalystiq_train.db
+      --experiment-name catalystiq-ml-validation
+      --output-dir /tmp/ml_runner_output
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: MLFLOW_DB_URL
+        fromDatabase:
+          name: catalystiq-mlflow-db
+          property: connectionString

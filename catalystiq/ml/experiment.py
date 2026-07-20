@@ -82,6 +82,7 @@ from catalystiq.ml.models.training import chronological_split
 from catalystiq.ml.oof import generate_oof_predictions
 from catalystiq.ml import plots
 from catalystiq.ml.tracking import BaseTracker, get_tracker
+from catalystiq.ml.universe_sp500 import SURVIVORSHIP_BIAS_WARNING
 
 # Acceptance thresholds for the experiment-level verdict. These are validation
 # gates for a *report*, NOT model-approval criteria (approval is a separate,
@@ -118,6 +119,7 @@ class HorizonResult:
     ranking: dict = field(default_factory=dict)
     behavior_model: dict = field(default_factory=dict)
     oof: dict = field(default_factory=dict)
+    regime_coverage: dict = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 
 
@@ -135,6 +137,7 @@ class ExperimentReport:
     target_definition_version: str
     split_protocol_version: str
     horizons_results: list[HorizonResult] = field(default_factory=list)
+    data_source_caveats: dict = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -186,6 +189,13 @@ def run_experiment(
         target_definition_version=TARGET_DEFINITION_VERSION,
         split_protocol_version=SPLIT_PROTOCOL_VERSION,
     )
+    report.data_source_caveats = {
+        "survivorship_bias": True,
+        "survivorship_bias_warning": SURVIVORSHIP_BIAS_WARNING,
+        "delisted_names_included": False,
+        "point_in_time_index_membership": False,
+        "data_provider": "free/listed-only (no delisted cohort)",
+    }
 
     with tracker.run(f"experiment:{report.experiment_name}") as _parent:
         tracker.set_tags({
@@ -193,6 +203,7 @@ def run_experiment(
             "authorized_process_only": True,
             "serving_enabled": False,
             "approval_performed": False,
+            "survivorship_bias": True,
         })
         tracker.log_params({
             "symbols": ",".join(symbols),
@@ -208,8 +219,10 @@ def run_experiment(
             "label_contract_version": TARGET_DEFINITION_VERSION,
             "split_protocol_version": SPLIT_PROTOCOL_VERSION,
             "is_synthetic": is_synthetic_data or bool(dataset_by_horizon),
+            "survivorship_bias_warning": SURVIVORSHIP_BIAS_WARNING,
         })
         tracker.log_dict(_feature_manifest(), "feature_manifest.json")
+        tracker.log_dict(report.data_source_caveats, "data_source_caveats.json")
 
         for horizon in horizons:
             hz = _run_horizon(
@@ -273,6 +286,13 @@ def _run_horizon(
         split=_split_summary(dataset, split),
     )
 
+    hz.regime_coverage = _regime_coverage(dataset)
+    if len([k for k in hz.regime_coverage if k != "unknown"]) < 2:
+        hz.warnings.append(
+            "Only one market regime is represented in this dataset; results may not "
+            "generalize across regimes. Widen the date range to span bull/bear/high-vol periods."
+        )
+
     sector_of = sector_resolver or (lambda s: None)
 
     with tracker.run(f"horizon:{horizon}d", nested=True):
@@ -302,10 +322,14 @@ def _run_horizon(
             "fold_embargoed_total": folds.embargoed_total,
         })
         tracker.log_metrics(coverage.per_group_present_rate, prefix="coverage")
+        tracker.log_metrics({"n_market_regimes": float(len([k for k in hz.regime_coverage if k != "unknown"]))})
+        tracker.log_metrics({f"regime_count.{k}": float(v) for k, v in hz.regime_coverage.items()})
         tracker.set_tags({
             "gate_passed": gate_passed,
             "always_missing_groups": ",".join(coverage.always_missing_groups),
+            "regimes_represented": len([k for k in hz.regime_coverage if k != "unknown"]),
         })
+        tracker.log_dict(hz.regime_coverage, "regime_coverage.json")
         tracker.log_dict(_dataset_manifest(dataset, symbols, benchmark, direction, horizon, hz),
                          "dataset_manifest.json")
         tracker.log_dict(_provenance_summary(dataset, provenance), "provenance_summary.json")
@@ -406,6 +430,12 @@ def _family_run(tracker, dataset, split, family, horizon, direction, sector_of, 
         tracker.log_metrics(result.holdout_metrics, prefix="holdout")
         if result.scorer_baseline_metrics:
             tracker.log_metrics(result.scorer_baseline_metrics, prefix="scorer_baseline")
+        if result.sliced_metrics:
+            tracker.log_dict(result.sliced_metrics, f"{family}/sliced_metrics.json")
+            # Surface per-sector holdout Brier as first-class metrics for charting.
+            for sector, m in result.sliced_metrics.get("by_sector", {}).items():
+                tracker.log_metrics({f"sector.{sector}.brier": m.get("brier_score"),
+                                     f"sector.{sector}.n": m.get("n")})
         tracker.set_tags(result.acceptance)
     return result
 
@@ -998,17 +1028,22 @@ def _model_comparison_report(report: ExperimentReport) -> dict:
                      "ranking": hz.ranking.get("ranking_metrics", {}),
                      "trading_after_costs": hz.ranking.get("trading_metrics_after_costs", {}),
                      "chosen": hz.ranking.get("chosen")})
-    return {"experiment": report.experiment_name, "comparison": rows}
+    return {"experiment": report.experiment_name, "comparison": rows,
+            "survivorship_bias_warning": SURVIVORSHIP_BIAS_WARNING}
 
 
 def _final_holdout_report(report: ExperimentReport) -> dict:
     return {
         "note": ("Final holdout evaluated ONCE per model after candidate selection. "
                  "No serving, approval or promotion is performed by this runner."),
+        "data_source_caveats": report.data_source_caveats,
+        "survivorship_bias_warning": SURVIVORSHIP_BIAS_WARNING,
         "horizons": [
             {
                 "horizon_days": hz.horizon_days,
                 "gate_passed": hz.gate_passed,
+                "regime_coverage": hz.regime_coverage,
+                "warnings": hz.warnings,
                 "models": [
                     {"family": m.family, "trained": m.trained,
                      "holdout_metrics": m.holdout_metrics,
@@ -1054,6 +1089,16 @@ def _log_fig(tracker, fig, artifact_file) -> None:
             plt.close(fig)
         except Exception:
             pass
+
+
+def _regime_coverage(dataset) -> dict:
+    """Count examples per market-regime bucket (from the point-in-time
+    ``market_regime`` feature), for regime-diversity reporting."""
+    out: dict[str, int] = {}
+    for ex in dataset.examples:
+        key = _regime_label(ex.features.get("market_regime"))
+        out[key] = out.get(key, 0) + 1
+    return dict(sorted(out.items()))
 
 
 def _regime_label(code) -> str:

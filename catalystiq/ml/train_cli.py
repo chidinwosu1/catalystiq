@@ -59,7 +59,13 @@ def build_parser() -> argparse.ArgumentParser:
         prog="catalystiq.ml.train_cli",
         description="Historical model-validation + MLflow experiment (offline, fail-closed).",
     )
-    p.add_argument("--symbols", required=True, help="Comma-separated ticker universe.")
+    p.add_argument("--symbols", default=None,
+                   help="Comma-separated ticker universe. Required unless --symbols-file is given "
+                        "(both may be combined).")
+    p.add_argument("--symbols-file", default=None,
+                   help="Path to a newline-delimited symbols file (one ticker per line; blank lines "
+                        "and lines starting with '#' are ignored). Combine with --symbols if desired. "
+                        "Generate an S&P 500 file with `python -m catalystiq.ml.universe_sp500`.")
     p.add_argument("--benchmark", default="SPY", help="Benchmark symbol (default SPY).")
     p.add_argument("--start", required=True, help="First prediction date, YYYY-MM-DD.")
     p.add_argument("--end", required=True, help="Last prediction date, YYYY-MM-DD.")
@@ -112,9 +118,31 @@ def _ingest(symbols: list[str], benchmark: str, db) -> list[str]:
     return warnings
 
 
+def _load_symbols(args) -> list[str]:
+    """Symbols from --symbols and/or --symbols-file, normalized and de-duplicated
+    (order preserved). Fails if neither yields any symbol."""
+    from catalystiq.ml.universe_sp500 import normalize_ticker, read_symbols_file
+
+    raw: list[str] = []
+    if args.symbols:
+        raw.extend(args.symbols.split(","))
+    if args.symbols_file:
+        raw.extend(read_symbols_file(args.symbols_file))
+    seen: set[str] = set()
+    out: list[str] = []
+    for s in raw:
+        sym = normalize_ticker(s)
+        if sym and sym not in seen:
+            seen.add(sym)
+            out.append(sym)
+    if not out:
+        raise SystemExit("no symbols: provide --symbols and/or a non-empty --symbols-file")
+    return out
+
+
 def main(argv: list[str] | None = None, *, db=None) -> int:
     args = build_parser().parse_args(argv)
-    symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
+    symbols = _load_symbols(args)
     horizons = [int(h) for h in args.horizons.split(",") if h.strip()]
     settings = _offline_settings(args.enable_training, args.database_url, args.experiment_name)
 
@@ -152,10 +180,17 @@ def main(argv: list[str] | None = None, *, db=None) -> int:
         if owns_db:
             db.close()
 
+    from catalystiq.ml.universe_sp500 import SURVIVORSHIP_BIAS_WARNING
+
     payload = report.to_dict()
     payload["ingest_warnings"] = ingest_warnings
     payload["smoke_test"] = args.smoke_test
+    payload["symbols_count"] = len(symbols)
     print(json.dumps(payload, indent=2, default=str))
+    # Repeat the survivorship caveat on stderr so it is never missed in logs.
+    print("\n" + "=" * 78, file=sys.stderr)
+    print("WARNING: " + SURVIVORSHIP_BIAS_WARNING, file=sys.stderr)
+    print("=" * 78, file=sys.stderr)
 
     # Exit non-zero if no horizon passed its gate (nothing was trainable yet).
     any_trained = any(
