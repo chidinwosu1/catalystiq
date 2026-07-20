@@ -156,10 +156,19 @@ def run_history_validation(
     is_synthetic_data: bool = False,
     max_missing_ratio: float = 0.02,
     max_gap_sessions: int = 5,
+    audit_only: bool = False,
 ) -> dict:
     """Audit coverage, fail closed if incomplete, else run per-horizon dry-run
-    diagnostics. Returns a JSON-able report dict."""
-    flags.training_enabled(settings).require()  # fail closed unless enabled
+    diagnostics. Returns a JSON-able report dict.
+
+    In ``audit_only`` mode this performs ONLY the coverage audit and returns
+    immediately - it never builds features or fits a model (even when coverage
+    passes) - so it does not require training to be enabled.
+    """
+    # The coverage audit is read-only (DB + calendar); only the model phase is
+    # training-gated. In audit-only mode we never reach that phase.
+    if not audit_only:
+        flags.training_enabled(settings).require()  # fail closed unless enabled
 
     from catalystiq.pipelines.market_price_pipeline import get_silver_bars
 
@@ -184,6 +193,15 @@ def run_history_validation(
         "step_days": step_days,
         "symbol_coverage": coverage,
     }
+
+    # Audit-only: return the full per-symbol coverage report and STOP here -
+    # before any feature building or model training, even if coverage passes.
+    if audit_only:
+        report["mode"] = "audit_only"
+        report["all_symbols_complete"] = not incomplete
+        report["incomplete_symbols"] = incomplete
+        report["status"] = "audit_only"
+        return report
 
     if require_complete_history and incomplete:
         report["status"] = "incomplete_history"
@@ -244,8 +262,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--direction", default="long", choices=["long", "short"])
     p.add_argument("--database-url", default=None)
     p.add_argument("--ingest", action="store_true")
+    p.add_argument("--audit-only", action="store_true",
+                   help="Ingest (if --ingest) and print the per-symbol coverage report, then EXIT "
+                        "before any feature building or model training. Read-only; --enable not needed.")
     p.add_argument("--enable", action="store_true",
-                   help="Enable ML + training for THIS process only (required; fail-closed without it).")
+                   help="Enable ML + training for THIS process only (required for the model phase; "
+                        "not needed for --audit-only).")
     p.add_argument("--allow-incomplete-history", action="store_true",
                    help="Do NOT fail closed on incomplete coverage (diagnostic only; not recommended).")
     p.add_argument("--max-missing-ratio", type=float, default=0.02)
@@ -290,6 +312,7 @@ def main(argv: list[str] | None = None, *, db=None) -> int:
             horizons=horizons, step_days=args.step_days, direction=args.direction,
             settings=settings, require_complete_history=not args.allow_incomplete_history,
             max_missing_ratio=args.max_missing_ratio, max_gap_sessions=args.max_gap_sessions,
+            audit_only=args.audit_only,
         )
     finally:
         if owns_db:
@@ -297,6 +320,8 @@ def main(argv: list[str] | None = None, *, db=None) -> int:
 
     report["ingest_warnings"] = ingest_warnings
     print(json.dumps(report, indent=2, default=str))
+    if report["status"] == "audit_only":
+        return 0 if report.get("all_symbols_complete") else 2
     if report["status"] == "incomplete_history":
         return 2
     return 0 if report.get("overall_sufficient") else 1

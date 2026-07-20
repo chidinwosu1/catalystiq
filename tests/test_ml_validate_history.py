@@ -86,6 +86,62 @@ def test_complete_history_runs_multi_horizon_reusing_features(test_db_session):
         assert report["horizons_results"][h]["folds"]["leakage_findings"] == []
 
 
+def test_audit_only_never_builds_features_or_trains(test_db_session, monkeypatch):
+    # Complete coverage so a non-audit run WOULD proceed to the model phase.
+    _seed(test_db_session, "AAA", start=dt.date(2019, 1, 1), end=dt.date(2020, 6, 30))
+    _seed(test_db_session, "SPY", start=dt.date(2019, 1, 1), end=dt.date(2020, 6, 30), seed=4.0)
+
+    import catalystiq.ml.validate_history as vh
+
+    def _boom(*a, **k):
+        raise AssertionError("feature build / trainer must NOT run in audit-only mode")
+
+    monkeypatch.setattr(vh, "_build_multi_horizon", _boom)
+    monkeypatch.setattr(vh, "run_training_dry_run", _boom)
+
+    # No enabling settings on purpose: audit-only is read-only and must not
+    # require training to be enabled.
+    report = vh.run_history_validation(
+        test_db_session, symbols=["AAA"], benchmark="SPY",
+        start=dt.date(2020, 1, 6), end=dt.date(2020, 3, 6), horizons=[1, 5, 10, 20],
+        settings=Settings(action_api_key="k"), audit_only=True,
+    )
+    assert report["mode"] == "audit_only"
+    assert report["status"] == "audit_only"
+    assert report["all_symbols_complete"] is True   # coverage passed...
+    assert "horizons_results" not in report          # ...but it still stopped
+    assert "feature_coverage_by_period" not in report
+    assert report["symbol_coverage"]["AAA"]["complete"] is True
+
+
+def test_audit_only_reports_incomplete_without_model_work(test_db_session, monkeypatch):
+    _seed(test_db_session, "AAA", start=dt.date(2023, 1, 1), end=dt.date(2023, 6, 30))
+    _seed(test_db_session, "SPY", start=dt.date(2023, 1, 1), end=dt.date(2023, 6, 30), seed=4.0)
+    import catalystiq.ml.validate_history as vh
+    monkeypatch.setattr(vh, "_build_multi_horizon",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not build")))
+    report = vh.run_history_validation(
+        test_db_session, symbols=["AAA"], benchmark="SPY",
+        start=dt.date(2020, 1, 1), end=dt.date(2020, 6, 30), horizons=[1, 5],
+        settings=Settings(action_api_key="k"), audit_only=True,
+    )
+    assert report["mode"] == "audit_only"
+    assert report["all_symbols_complete"] is False
+    assert "AAA" in report["incomplete_symbols"]
+
+
+def test_cli_audit_only_exit_codes(test_db_session):
+    _seed(test_db_session, "AAA", start=dt.date(2019, 1, 1), end=dt.date(2020, 6, 30))
+    _seed(test_db_session, "SPY", start=dt.date(2019, 1, 1), end=dt.date(2020, 6, 30), seed=4.0)
+    # Complete + audit-only + no --enable -> exit 0
+    code = main(
+        ["--symbols", "AAA", "--benchmark", "SPY", "--start", "2020-01-06",
+         "--end", "2020-03-06", "--horizons", "1,5", "--audit-only"],
+        db=test_db_session,
+    )
+    assert code == 0
+
+
 def test_cli_exit_code_incomplete_history(test_db_session):
     _seed(test_db_session, "AAA", start=dt.date(2023, 1, 1), end=dt.date(2023, 6, 30))
     _seed(test_db_session, "SPY", start=dt.date(2023, 1, 1), end=dt.date(2023, 6, 30), seed=4.0)
