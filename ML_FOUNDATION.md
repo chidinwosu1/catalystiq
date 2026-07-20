@@ -195,6 +195,25 @@ states. `GET /ml/status`, `/ml/feature-requirements`, and `/ml/registry`
 expose non-sensitive metadata. No endpoint ever returns placeholder
 probabilities or demo values.
 
+## Chronological training dry-run (`ml/dry_run.py`)
+
+`run_training_dry_run(...)` exercises the whole offline path end-to-end —
+`SilverPointInTimeProvider` → `TrainingExampleBuilder` → chronological split +
+purged walk-forward + leakage checks → feature-coverage & label diagnostics →
+(optionally) fit candidate Models 1–3 → a **sufficiency verdict** — to answer
+"are the wired point-in-time features and available history actually sufficient
+to train?" *before* any model is approved.
+
+It is a training-side tool and **fails closed**: it refuses to run unless
+`ENABLE_ML` + `ENABLE_ML_TRAINING` are set in the passed settings, model fitting
+additionally needs scikit-learn, and it only ever registers **candidate**
+(never approved) artifacts — synthetic-data runs can never be promoted. It
+accepts either a symbol set + prediction dates (builds from validated Silver) or
+a pre-built dataset. The report includes fold purge/embargo counts, any leakage
+findings, per-feature-group coverage, label class balance / return variance, and
+a structured `sufficiency` block with human-readable notes (including the
+expected always-missing groups: earnings, macro).
+
 ## What remains before any model can be approved
 
 1. **Real point-in-time data wiring** — *price-derived + rule-based groups are
