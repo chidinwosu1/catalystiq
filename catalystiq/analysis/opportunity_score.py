@@ -420,10 +420,27 @@ def score_symbol(
         except MarketDataError:
             sector_bars = None
 
+    # Scoring is CPU-bound and its longest indicator lookback is ~200 sessions,
+    # so cap the bars fed to the scorer. Verified score-identical vs full 5y
+    # history (tests), while cutting per-symbol CPU ~3x. Ingestion and other
+    # analyses still keep the full Silver history.
+    max_bars = _scoring_max_bars()
+    bars = bars[-max_bars:]
+    if market_bars:
+        market_bars = market_bars[-max_bars:]
+    if sector_bars:
+        sector_bars = sector_bars[-max_bars:]
+
     return build_opportunity_score(
         symbol, bars, now=now, market_bars=market_bars, market_symbol=market_symbol,
         sector_bars=sector_bars, sector_symbol=sector_symbol,
     )
+
+
+def _scoring_max_bars() -> int:
+    from catalystiq.config import get_settings
+
+    return get_settings().scoring_max_bars
 
 
 # Curated, liquid large-cap starter universe for the ranked scan. This is a
@@ -481,9 +498,12 @@ def scan_universe(provider, db, now: dt.datetime, top: int = 4, universe=None) -
 # scan requests reuse one computed result within a short window. The cached
 # OpportunityScan keeps its original as_of (point-in-time), never re-stamped.
 
+import logging as _logging  # noqa: E402
 import threading as _threading  # noqa: E402
 import time as _time  # noqa: E402
 from dataclasses import dataclass as _dataclass  # noqa: E402
+
+_logger = _logging.getLogger(__name__)
 
 
 @_dataclass
@@ -500,6 +520,22 @@ def clear_scan_cache() -> None:
     """Drop cached scans. Test-support only."""
     with _SCAN_CACHE_LOCK:
         _SCAN_CACHE.clear()
+
+
+def refresh_scan_cache(provider, db, now: dt.datetime, tops=(4,), monotonic=_time.monotonic) -> None:
+    """Compute the default-universe scan for each `top` and store it in the
+    cache. Called by the background warmer so the user-facing scan request is a
+    pure cache read instead of a ~tens-of-seconds scoring loop. A failure for
+    one `top` is logged and skipped - it never breaks the warm loop."""
+    for top in tops:
+        try:
+            scan = scan_universe(provider, db, now, top=top)
+        except Exception:  # pragma: no cover - defensive; keep other tops
+            _logger.exception("scan cache refresh failed for top=%s", top)
+            continue
+        key = (SCAN_UNIVERSE, max(0, min(top, _MAX_SCAN_TOP)))
+        with _SCAN_CACHE_LOCK:
+            _SCAN_CACHE[key] = _ScanCacheEntry(scan=scan, stored_at=monotonic())
 
 
 def scan_universe_cached(
