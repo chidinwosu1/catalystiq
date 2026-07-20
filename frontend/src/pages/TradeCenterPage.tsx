@@ -1,12 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Info, Loader2 } from "lucide-react";
 import WorkflowBar from "../components/trade/WorkflowBar";
-import {
-  ApiError,
-  getOpportunityScanShared,
-  getQuotes,
-  type OpportunityScore,
-} from "../lib/api";
+import { ApiError, getOpportunityScanShared, type OpportunityScore } from "../lib/api";
+import { useLiveQuotes } from "../lib/liveData";
 import type { PageId } from "../types/nav";
 
 interface TradeCenterPageProps {
@@ -111,7 +107,6 @@ export default function TradeCenterPage({
 }: TradeCenterPageProps) {
   const [candidates, setCandidates] = useState<OpportunityScore[] | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  const [prices, setPrices] = useState<Record<string, number | null>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -124,19 +119,6 @@ export default function TradeCenterPage({
         if (!alive) return;
         setCandidates(scan.candidates);
         setNote(scan.note);
-        const syms = scan.candidates.map((c) => c.symbol);
-        if (syms.length) {
-          getQuotes(syms)
-            .then((q) => {
-              if (!alive) return;
-              const m: Record<string, number | null> = {};
-              q.forEach((r) => (m[r.symbol.toUpperCase()] = r.status === "ok" ? r.price : null));
-              setPrices(m);
-            })
-            .catch(() => {
-              /* live price is optional; never fabricated */
-            });
-        }
       })
       .catch((e) => {
         if (alive) setError(e instanceof ApiError ? e.message : "Could not load candidates.");
@@ -148,6 +130,21 @@ export default function TradeCenterPage({
       alive = false;
     };
   }, []);
+
+  // Live candidate prices track the loaded set of candidates through the shared
+  // 15s cache. The opportunity scan itself is slow-changing and stays one-shot.
+  const candidateSymbols = useMemo(
+    () => candidates?.map((c) => c.symbol) ?? [],
+    [candidates]
+  );
+  const priceQuery = useLiveQuotes(candidateSymbols);
+  const prices = useMemo(() => {
+    const m: Record<string, number | null> = {};
+    (priceQuery.data ?? []).forEach(
+      (r) => (m[r.symbol.toUpperCase()] = r.status === "ok" ? r.price : null)
+    );
+    return m;
+  }, [priceQuery.data]);
 
   return (
     <div>

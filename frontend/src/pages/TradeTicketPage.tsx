@@ -12,23 +12,18 @@ import {
   ApiError,
   cancelScheduledOrder,
   confirmOrder,
-  getAccount,
   getFundamentals,
-  getPositions,
-  getQuote,
   getScheduledOrders,
   scheduleOrder,
   submitOrder,
-  type AccountInfo,
   type FundamentalsSnapshot,
   type NewOrder,
   type OrderConfirmation,
   type OrderType,
-  type Position,
-  type Quote,
   type ScheduledOrderRecord,
   type TimeInForce,
 } from "../lib/api";
+import { useLiveAccount, useLivePositions, useLiveQuote } from "../lib/liveData";
 import SectionCard from "../components/SectionCard";
 import NextAction from "../components/NextAction";
 import TickerSearch from "../components/TickerSearch";
@@ -106,13 +101,21 @@ export default function TradeTicketPage({
 }: TradeTicketPageProps) {
   const [symbol, setSymbol] = useState(initialSymbol.trim().toUpperCase());
 
-  const [quote, setQuote] = useState<Quote | null>(null);
   const [fundamentals, setFundamentals] = useState<FundamentalsSnapshot | null>(null);
-  const [quoteLoading, setQuoteLoading] = useState(false);
-  const [quoteError, setQuoteError] = useState<ApiError | null>(null);
 
-  const [account, setAccount] = useState<AccountInfo | null>(null);
-  const [positions, setPositions] = useState<Position[]>([]);
+  // Live quote / account / positions via the shared 15s cache (deduped with the
+  // Portfolio page). Read-only: order placement below is untouched. A stale
+  // refresh keeps the last quote on screen rather than flashing an error.
+  const quoteQuery = useLiveQuote(symbol);
+  const quote = quoteQuery.data ?? null;
+  const quoteLoading = quoteQuery.status === "loading";
+  const quoteError =
+    quoteQuery.status === "error" ? (quoteQuery.error as ApiError | undefined) ?? null : null;
+
+  const accountQuery = useLiveAccount();
+  const positionsQuery = useLivePositions();
+  const account = accountQuery.data ?? null;
+  const positions = useMemo(() => positionsQuery.data ?? [], [positionsQuery.data]);
 
   const [tradingStyle, setTradingStyle] = useState<TradingStyle>("swing");
   const [timePeriod, setTimePeriod] = useState(DEFAULT_TIME_PERIOD.swing);
@@ -157,15 +160,6 @@ export default function TradeTicketPage({
     setSymbol(initialSymbol.trim().toUpperCase());
   }, [initialSymbol]);
 
-  useEffect(() => {
-    getAccount()
-      .then(setAccount)
-      .catch(() => setAccount(null));
-    getPositions()
-      .then(setPositions)
-      .catch(() => setPositions([]));
-  }, []);
-
   function refreshScheduledOrders() {
     getScheduledOrders()
       .then(setScheduledOrders)
@@ -206,48 +200,24 @@ export default function TradeTicketPage({
     executionMode,
   ]);
 
+  // Fundamentals (company name) is slow-changing and stays a one-shot fetch per
+  // symbol — the live quote above refreshes on the shared 15s cadence, this does
+  // not. Independent of the quote: a fundamentals failure never blocks the price.
   useEffect(() => {
     if (!symbol) {
-      setQuote(null);
       setFundamentals(null);
-      setQuoteError(null);
       return;
     }
     const controller = new AbortController();
     let cancelled = false;
-
-    // Quote and fundamentals are INDEPENDENT calls. A fundamentals failure
-    // (e.g. a Yahoo rate-limit) must never prevent the executable price/quote
-    // from loading, and vice-versa. Switching symbol clears the prior symbol's
-    // data so a stale quote is never shown against the new ticker.
-    setQuote(null);
     setFundamentals(null);
-    setQuoteLoading(true);
-    setQuoteError(null);
-
-    getQuote(symbol, controller.signal)
-      .then((q) => {
-        if (!cancelled) setQuote(q);
-      })
-      .catch((error: unknown) => {
-        if (cancelled || controller.signal.aborted) return;
-        setQuote(null);
-        setQuoteError(error instanceof ApiError ? error : new ApiError(0, "Unexpected error."));
-      })
-      .finally(() => {
-        if (!cancelled) setQuoteLoading(false);
-      });
-
     getFundamentals(symbol, controller.signal)
       .then((f) => {
         if (!cancelled) setFundamentals(f);
       })
       .catch(() => {
-        // Non-fatal: the company name just won't show. Never blocks the quote
-        // or the order-value estimate.
         if (!cancelled) setFundamentals(null);
       });
-
     return () => {
       cancelled = true;
       controller.abort();
