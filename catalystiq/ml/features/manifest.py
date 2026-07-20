@@ -54,8 +54,9 @@ _GROUP_STATUS: dict[FeatureGroup, tuple[SourceStatus, str]] = {
     ),
     FeatureGroup.GAPS: (SourceStatus.WIRED, f"Wired via {_PIT} (overnight gap from PIT bars)."),
     FeatureGroup.SUPPORT_RESISTANCE: (
-        SourceStatus.INTEGRATION_EXISTS_NOT_PIT,
-        "Market-structure product computes levels; distance-to-level not yet mapped into the PIT provider (recorded MISSING).",
+        SourceStatus.WIRED,
+        f"Wired via {_PIT}: distance to the nearest ACTIVE support/resistance from the "
+        "market-structure snapshot on point-in-time bars; MISSING when no active level exists.",
     ),
     FeatureGroup.MARKET_SECTOR: (
         SourceStatus.WIRED,

@@ -116,15 +116,16 @@ so the feature vector is **look-ahead invariant**: identical whether or not
 future bars exist in the database (asserted in tests). `get_executable_entry`
 returns the *next* session's open (offline only; `None` at live inference).
 
-Wired now (39 features): adjusted OHLCV, trend/MA, momentum, RSI/MACD,
+Wired now (41 features): adjusted OHLCV, trend/MA, momentum, RSI/MACD,
 volatility/ATR, volume/relative-volume, liquidity/estimated-spread, gaps,
-market/sector, relative strength, beta, **market regime** (a versioned,
-deterministic trend×volatility classifier over point-in-time benchmark bars,
-`features/regime.py`), **point-in-time SEC fundamentals** (revenue YoY, gross
-margin, recent-filing flag — see below), the Rule-Based Opportunity Score and
-its factor sub-scores, missingness indicators, and data-quality/freshness.
-Still recorded as gaps (MISSING, never fabricated): earnings proximity, and the
-BLS/BEA macro features (see the vintage note below).
+**support/resistance distances** (nearest active level from the market-structure
+snapshot on point-in-time bars), market/sector, relative strength, beta,
+**market regime** (a versioned, deterministic trend×volatility classifier over
+point-in-time benchmark bars, `features/regime.py`), **point-in-time SEC
+fundamentals** (revenue YoY, gross margin, recent-filing flag — see below), the
+Rule-Based Opportunity Score and its factor sub-scores, missingness indicators,
+and data-quality/freshness. Still recorded as gaps (MISSING, never fabricated):
+earnings proximity, and the BLS/BEA macro features (see the vintage note below).
 
 ### Point-in-time vintages: SEC, BLS, BEA (`features/fundamentals_pit.py`, `features/macro_pit.py`)
 
@@ -204,8 +205,10 @@ probabilities or demo values.
    vintage-preserving ingestion lands. Remaining before full-feature training:
    a point-in-time earnings calendar (needs a licensed, timestamped feed),
    vintage-preserving BLS/BEA ingestion (to activate the already-written macro
-   reads), and support/resistance distances. See `feature_requirements.json`
-   for the live status of each group.
+   reads). Support/resistance distances are now wired. See
+   `feature_requirements.json` for the live status of each group. The only
+   `unavailable` group left is earnings proximity — it genuinely needs a
+   licensed, timestamped feed and is never fabricated or substituted.
 2. **A real historical dataset** — successful/unsuccessful/**delisted**
    securities, point-in-time universe membership, corporate-action
    adjustment, cost estimates, full provenance. No user-facing artifact may be

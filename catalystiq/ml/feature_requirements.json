@@ -3,9 +3,9 @@
   "generated_by": "catalystiq.ml.features.manifest",
   "note": "Machine-readable record of the point-in-time features each model family needs and whether a provider-neutral source is wired. Features without a wired source are recorded here, never fabricated. No model may train on real data until every feature it requires is 'wired'.",
   "counts_by_status": {
-    "integration_exists_not_point_in_time": 4,
+    "integration_exists_not_point_in_time": 2,
     "unavailable": 1,
-    "wired": 39
+    "wired": 41
   },
   "blocking_unavailable": [
     "earnings_proximity"
@@ -415,8 +415,8 @@
       "feature_name": "dist_to_resistance_pct",
       "group": "support_resistance",
       "description": "Distance to resistance",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Market-structure product computes levels; distance-to-level not yet mapped into the PIT provider (recorded MISSING).",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider: distance to the nearest ACTIVE support/resistance from the market-structure snapshot on point-in-time bars; MISSING when no active level exists.",
       "required_by": [
         "model_1",
         "model_5"
@@ -426,8 +426,8 @@
       "feature_name": "dist_to_support_pct",
       "group": "support_resistance",
       "description": "Distance to support",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Market-structure product computes levels; distance-to-level not yet mapped into the PIT provider (recorded MISSING).",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider: distance to the nearest ACTIVE support/resistance from the market-structure snapshot on point-in-time bars; MISSING when no active level exists.",
       "required_by": [
         "model_1",
         "model_5"

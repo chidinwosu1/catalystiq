@@ -137,3 +137,30 @@ def test_manifest_reflects_wired_price_sources():
     # rule-based + price groups are wired now
     wired = {r["feature_name"] for r in m["requirements"] if r["source_status"] == "wired"}
     assert "rsi_14" in wired and "rule_based_setup_strength" in wired
+
+
+def test_support_resistance_distances_from_levels():
+    """Nearest active support-below / resistance-above, as positive fractions."""
+    from types import SimpleNamespace
+    from catalystiq.ml.features.pit_provider import _support_resistance_distances
+
+    def lvl(price, type_, status="active"):
+        return SimpleNamespace(price=price, type=type_, status=status)
+
+    struct = SimpleNamespace(support_resistance_levels=[
+        lvl(90.0, "support"), lvl(95.0, "support"), lvl(80.0, "support"),
+        lvl(110.0, "resistance"), lvl(105.0, "resistance"),
+        lvl(102.0, "resistance", status="broken"),  # ignored (broken)
+    ])
+    ds, dr = _support_resistance_distances(struct, 100.0)
+    assert abs(ds - (100.0 - 95.0) / 100.0) < 1e-9   # nearest support below
+    assert abs(dr - (105.0 - 100.0) / 100.0) < 1e-9  # nearest active resistance above
+
+
+def test_support_resistance_missing_when_no_active_level():
+    from types import SimpleNamespace
+    from catalystiq.ml.features.pit_provider import _support_resistance_distances
+
+    struct = SimpleNamespace(support_resistance_levels=[])
+    ds, dr = _support_resistance_distances(struct, 100.0)
+    assert ds is None and dr is None

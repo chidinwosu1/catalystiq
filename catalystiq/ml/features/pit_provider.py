@@ -230,10 +230,11 @@ class SilverPointInTimeProvider:
         ]
         # --- gaps ---------------------------------------------------------
         features += [mk("overnight_gap_pct", _overnight_gap_pct(bars))]
-        # --- support / resistance (no PIT mapping yet -> recorded missing)-
+        # --- support / resistance distances (point-in-time market structure)
+        dist_support, dist_resistance = _support_resistance_distances(snaps.struct, last.close)
         features += [
-            mk("dist_to_support_pct", None, DataQualityStatus.MISSING),
-            mk("dist_to_resistance_pct", None, DataQualityStatus.MISSING),
+            mk("dist_to_support_pct", dist_support),
+            mk("dist_to_resistance_pct", dist_resistance),
         ]
         # --- market / sector / relative strength / beta ------------------
         features += [
@@ -300,14 +301,31 @@ class SilverPointInTimeProvider:
 
 
 # --- snapshot computation ---------------------------------------------------
+def _support_resistance_distances(struct, close):
+    """Distance (as a positive fraction of price) to the nearest ACTIVE support
+    below and resistance above the current close. Returns (None, None) parts
+    when no active level exists on that side - recorded MISSING, not fabricated."""
+    if struct is None or close is None or close <= 0:
+        return (None, None)
+    levels = getattr(struct, "support_resistance_levels", None) or []
+    supports = [lv.price for lv in levels
+                if lv.type == "support" and lv.status == "active" and lv.price < close]
+    resistances = [lv.price for lv in levels
+                   if lv.type == "resistance" and lv.status == "active" and lv.price > close]
+    dist_support = (close - max(supports)) / close if supports else None
+    dist_resistance = (min(resistances) - close) / close if resistances else None
+    return (dist_support, dist_resistance)
+
+
 class _Snapshots:
-    __slots__ = ("tech", "risk", "vol", "ctx", "opportunity", "regime",
+    __slots__ = ("tech", "risk", "vol", "ctx", "opportunity", "regime", "struct",
                  "market_return_20d", "sector_return_20d")
 
 
 def _compute_snapshots(symbol, bars, prediction_timestamp, benchmark_symbol, sector_resolver, bars_asof):
     from catalystiq.analysis.indicators import compute_technical_snapshot
     from catalystiq.analysis.market_context import compute_market_context_snapshot
+    from catalystiq.analysis.market_structure import compute_market_structure_snapshot
     from catalystiq.analysis.risk import compute_risk_snapshot
     from catalystiq.analysis.volume_liquidity import compute_volume_liquidity_snapshot
 
@@ -315,6 +333,7 @@ def _compute_snapshots(symbol, bars, prediction_timestamp, benchmark_symbol, sec
     s.tech = compute_technical_snapshot(symbol, bars)
     s.risk = compute_risk_snapshot(symbol, bars)
     s.vol = compute_volume_liquidity_snapshot(symbol, bars)
+    s.struct = compute_market_structure_snapshot(symbol, bars)
 
     market_bars = bars_asof(benchmark_symbol, prediction_timestamp) if benchmark_symbol else []
     sector_symbol = sector_resolver(symbol) if sector_resolver else None
