@@ -249,7 +249,15 @@ non-zero when the data is not yet sufficient for training.
    trained on synthetic/demo data.
 3. **Chronological training + evaluation runs** with the walk-forward
    splitter, reporting the full metric batteries per horizon/sector/regime/
-   liquidity/direction.
+   liquidity/direction. *The offline runner for this now exists* —
+   `catalystiq/ml/experiment.py` + `catalystiq/ml/train_cli.py`, with MLflow
+   experiment tracking (parent/child runs, metrics, artifacts). It fails closed,
+   runs the sufficiency/leakage/chronology gates first and refuses to train on
+   failure, generates out-of-fold Model 1–3 predictions before Model 4, and
+   evaluates once on the untouched holdout after candidate selection. See
+   `ML_VALIDATION_MLFLOW.md`. It still approves nothing — running it on a real,
+   broad, regime-diverse, delisting-aware history is the remaining data-side
+   work.
 4. **Serving loader** for approved serialized artifacts (intentionally not
    wired yet — inference fails closed even if artifacts were approved).
 5. **Explicit human approval** in the registry, per family/direction/horizon.

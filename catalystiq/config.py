@@ -295,6 +295,23 @@ class Settings(BaseSettings):
     behavior_model_require_approved_artifact: bool = True
     behavior_model_allow_demo_data: bool = False
 
+    # --- MLflow experiment tracking (offline training/validation only) -----
+    # Where the offline training/validation runner (catalystiq/ml/train_cli.py)
+    # records parameters, metrics and artifacts. These configure tracking ONLY;
+    # they never enable training, inference, serving or approval - those stay
+    # gated by the fail-closed flags above. Credentials and remote URLs are
+    # NEVER hard-coded: leave the tracking URI blank and a local ``mlruns``
+    # directory is used for development. Point it at a server via the
+    # MLFLOW_TRACKING_URI environment variable (which MLflow also reads
+    # natively) when you want a shared backend; any auth is supplied through
+    # MLflow's own environment variables, not this file.
+    mlflow_tracking_uri: str = ""
+    mlflow_experiment_name: str = "catalystiq-ml-validation"
+    # Optional local directory used when no tracking URI is configured. A
+    # relative path is resolved against the current working directory at run
+    # time, so `mlflow ui` started from the repo root finds it.
+    mlflow_local_dir: str = "mlruns"
+
 
 class ConfigurationError(RuntimeError):
     """Raised at startup when an enabled data source is missing required

@@ -16,5 +16,10 @@ numpy  # ML foundation: labels, splitter, calibration, metrics (catalystiq/ml/)
 scikit-learn  # ML foundation training pipelines (imported lazily; catalystiq/ml/models/)
 TA-Lib==0.7.1  # pinned - reference-calculation adapter (catalystiq/validation/reference/)
 
+# ML validation + experiment tracking (offline training runner only; imported
+# lazily so the app and disabled ML foundation still import without them).
+mlflow  # experiment tracking for catalystiq/ml/train_cli.py (parent/child runs, metrics, artifacts)
+matplotlib  # calibration/ROC/PR/coverage plots logged as MLflow artifacts (optional at runtime)
+
 # dev / test
 pytest

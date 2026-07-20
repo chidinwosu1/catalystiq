@@ -66,6 +66,11 @@ db.sqlite3-journal
 # Catalyst IQ local dev database
 /catalystiq.db
 
+# MLflow experiment-tracking outputs (offline training/validation runner)
+/mlruns/
+/mlflow.db
+/ml_runner_output/
+
 # Flask stuff:
 instance/
 .webassets-cache
