@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, BookOpen, Loader2, RefreshCw } from "lucide-react";
 import {
+  ApiError,
   getFundamentals,
-  type ApiError,
+  getOrderHistory,
   type FundamentalsSnapshot,
+  type OrderRecord,
 } from "../lib/api";
 import { useLiveAccount, useLivePositions } from "../lib/liveData";
 import {
@@ -87,6 +89,30 @@ export default function PortfolioPage({
     accountQuery.refetch();
     positionsQuery.refetch();
   };
+
+  // Recently filled orders back the "how did I get here" view alongside the
+  // current positions. Fetched independently (one-shot — order history is not a
+  // fast-moving live value) so a history failure, or a broker that doesn't
+  // support it, never blanks the positions/account view.
+  const [filledOrders, setFilledOrders] = useState<OrderRecord[] | null>(null);
+  const [ordersError, setOrdersError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setOrdersError(null);
+    getOrderHistory({ filledOnly: true })
+      .then((orders) => {
+        if (alive) setFilledOrders(orders);
+      })
+      .catch((err: unknown) => {
+        if (!alive) return;
+        setFilledOrders([]);
+        setOrdersError(err instanceof ApiError ? err.message : "Could not load order history.");
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // Real sector exposure from holdings: sector comes from provider fundamentals
   // (cached per symbol), weighted by each position's current market value. The
@@ -314,6 +340,79 @@ export default function PortfolioPage({
                             Analysis
                           </button>
                         </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
+
+      <SectionCard
+        title="Filled Orders"
+        description="Recently executed orders from the connected broker (read-only)"
+      >
+        {ordersError ? (
+          <p className="text-sm text-ink-muted">{ordersError}</p>
+        ) : filledOrders === null ? (
+          <p className="text-sm text-ink-muted">Loading filled orders…</p>
+        ) : filledOrders.length === 0 ? (
+          <p className="text-sm text-ink-secondary">No filled orders in the recent window.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-border text-xs uppercase tracking-wide text-ink-muted">
+                  <th className="py-2 pr-3 font-medium">Ticker</th>
+                  <th className="py-2 pr-3 font-medium">Side</th>
+                  <th className="py-2 pr-3 font-medium">Type</th>
+                  <th className="py-2 pr-3 font-medium">Filled</th>
+                  <th className="py-2 pr-3 font-medium">Avg price</th>
+                  <th className="py-2 pr-3 font-medium">Amount</th>
+                  <th className="py-2 pr-3 font-medium">Status</th>
+                  <th className="py-2 font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filledOrders.map((o) => {
+                  const isBuy = o.side.toUpperCase().startsWith("B");
+                  const amount = Number(o.filled_amount) || 0;
+                  return (
+                    <tr
+                      key={o.client_order_id || o.order_id || `${o.symbol}-${o.created_at}`}
+                      className="border-b border-border last:border-0"
+                    >
+                      <td className="py-2.5 pr-3 font-medium text-ink-primary">{o.symbol}</td>
+                      <td
+                        className={`py-2.5 pr-3 font-medium ${
+                          isBuy ? "text-status-good" : "text-status-critical"
+                        }`}
+                      >
+                        {o.side || "—"}
+                      </td>
+                      <td className="py-2.5 pr-3 text-ink-secondary">{o.order_type || "—"}</td>
+                      <td className="py-2.5 pr-3 text-ink-secondary">
+                        {o.filled_qty}
+                        {Number(o.total_qty) !== Number(o.filled_qty) ? ` / ${o.total_qty}` : ""}
+                      </td>
+                      <td className="py-2.5 pr-3 text-ink-secondary">
+                        {money(Number(o.avg_fill_price))}
+                      </td>
+                      <td className="py-2.5 pr-3 text-ink-secondary">
+                        {amount ? money(amount) : "—"}
+                      </td>
+                      <td className="py-2.5 pr-3 text-ink-secondary">
+                        {o.status === "partially_filled" ? "Partially filled" : "Filled"}
+                      </td>
+                      <td className="py-2.5">
+                        <button
+                          onClick={() => onViewAnalysis(o.symbol)}
+                          className="text-xs font-medium text-ink-secondary hover:text-ink-primary"
+                        >
+                          Analysis
+                        </button>
                       </td>
                     </tr>
                   );
