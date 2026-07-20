@@ -96,6 +96,42 @@ export interface Position {
   change_today: string;
 }
 
+export interface BrokerAccount {
+  account_id: string;
+  account_number: string;
+  account_type: string;
+  currency: string;
+  status: string;
+  raw: Record<string, unknown>;
+}
+
+export type OrderStatusNorm =
+  | "filled"
+  | "partially_filled"
+  | "open"
+  | "cancelled"
+  | "failed"
+  | "unknown";
+
+export interface OrderRecord {
+  order_id: string;
+  client_order_id: string;
+  symbol: string;
+  side: string;
+  order_type: string;
+  time_in_force: string;
+  status: OrderStatusNorm;
+  status_raw: string;
+  total_qty: string;
+  filled_qty: string;
+  avg_fill_price: string;
+  filled_amount: string;
+  commission: string;
+  created_at: string;
+  updated_at: string;
+  raw: Record<string, unknown>;
+}
+
 export type OrderSide = "buy" | "sell";
 export type OrderType = "market" | "limit" | "stop" | "stop_limit" | "trailing_stop";
 export type TimeInForce = "day" | "gtc" | "ioc" | "fok";
@@ -485,6 +521,31 @@ export function getPositions(): Promise<Position[]> {
 
 export function getOrders(): Promise<Record<string, unknown>[]> {
   return request("/paper/orders");
+}
+
+/** Read-only broker account list (confirms the API account id). */
+export function getBrokerAccounts(): Promise<BrokerAccount[]> {
+  return request("/paper/accounts");
+}
+
+/**
+ * Read-only, normalized order history. Webull defaults to the last 7 days
+ * when no date range is given. Pass `filledOnly` for the Portfolio filled-
+ * orders view. Never places or cancels an order.
+ */
+export function getOrderHistory(opts?: {
+  symbol?: string;
+  filledOnly?: boolean;
+  startDate?: string;
+  endDate?: string;
+}): Promise<OrderRecord[]> {
+  const params = new URLSearchParams();
+  if (opts?.symbol) params.set("symbol", opts.symbol);
+  if (opts?.filledOnly) params.set("filled_only", "true");
+  if (opts?.startDate) params.set("start_date", opts.startDate);
+  if (opts?.endDate) params.set("end_date", opts.endDate);
+  const qs = params.toString();
+  return request(`/paper/order-history${qs ? `?${qs}` : ""}`);
 }
 
 /**

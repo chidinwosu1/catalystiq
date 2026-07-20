@@ -27,11 +27,15 @@ from catalystiq.providers.broker import (
     OrderNotFoundError,
     get_broker_provider,
 )
+from catalystiq.reconciliation import find_order, reconcile_order
 from catalystiq.schemas.broker import (
     AccountInfo,
+    BrokerAccount,
     ConfirmedOrder,
     NewOrder,
     OrderConfirmationResponse,
+    OrderReconciliation,
+    OrderRecord,
     OrderReview,
     Position,
     ScheduledOrderCreate,
@@ -106,6 +110,95 @@ def get_paper_orders(broker: BrokerProvider = Depends(get_broker_provider)):
         return broker.get_orders()
     except BrokerError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/accounts", response_model=list[BrokerAccount])
+def list_broker_accounts(broker: BrokerProvider = Depends(get_broker_provider)):
+    """Read-only account list (Webull GET /openapi/account/list). Used to
+    confirm the exact API account id behind a human-facing account number.
+    Never places or cancels an order."""
+    try:
+        return broker.get_account_list()
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except BrokerError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/order-history", response_model=list[OrderRecord])
+def get_order_history(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    symbol: str | None = None,
+    filled_only: bool = False,
+    broker: BrokerProvider = Depends(get_broker_provider),
+):
+    """Read-only, paginated, normalized order history. `start_date`/`end_date`
+    are yyyy-MM-dd (Webull defaults to the last 7 days when both are omitted).
+    Optional `symbol` and `filled_only` filters back the Portfolio UI's
+    filled-orders view. Never places or cancels an order."""
+    try:
+        return broker.get_order_history(
+            start_date=start_date,
+            end_date=end_date,
+            symbol=symbol,
+            filled_only=filled_only,
+        )
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except BrokerError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/reconcile", response_model=OrderReconciliation)
+def reconcile_paper_order(
+    symbol: str | None = None,
+    client_order_id: str | None = None,
+    order_id: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    baseline_buying_power: str | None = None,
+    broker: BrokerProvider = Depends(get_broker_provider),
+):
+    """Read-only reconciliation of one order against the resulting position and
+    account balance. Identify the order by `client_order_id`/`order_id`, or by
+    `symbol` (the latest filled order for that symbol is used). Pass
+    `baseline_buying_power` (a pre-trade snapshot) to compute the actual
+    buying-power delta; without it, only the modeled cash impact is reported.
+    Never places, modifies, or cancels an order."""
+    if not any([symbol, client_order_id, order_id]):
+        raise HTTPException(
+            status_code=422,
+            detail="Provide one of: symbol, client_order_id, or order_id.",
+        )
+    try:
+        orders = broker.get_order_history(
+            start_date=start_date, end_date=end_date, symbol=symbol
+        )
+        order = find_order(
+            orders, symbol=symbol, client_order_id=client_order_id, order_id=order_id
+        )
+        if order is None:
+            raise HTTPException(
+                status_code=404,
+                detail="No matching order found in the requested window "
+                "(Webull defaults to the last 7 days; widen start_date/end_date).",
+            )
+        positions = broker.get_positions()
+        account = broker.get_account()
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except BrokerError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    account_id = getattr(broker, "_account_id", "")
+    return reconcile_order(
+        account_id=account_id,
+        order=order,
+        positions=positions,
+        account=account,
+        baseline_buying_power=baseline_buying_power,
+    )
 
 
 @router.get("/webull-raw")
