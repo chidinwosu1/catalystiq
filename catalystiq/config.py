@@ -65,13 +65,18 @@ class Settings(BaseSettings):
     broker_provider: str = "webull"
 
     # Webull OpenAPI credentials (https://developer.webull.com/apis/docs/trade-api/getting-started).
-    # region_id is e.g. "us" or "hk"; api_endpoint defaults to Webull's own
-    # resolver but can be pointed at the sandbox host explicitly.
+    # All credentials stay server-side (never in the frontend bundle or a
+    # browser-visible value). region_id is e.g. "us" or "hk".
     webull_app_key: str = ""
     webull_app_secret: str = ""
     webull_account_id: str = ""
     webull_region_id: str = "us"
-    webull_api_endpoint: str = ""
+    # Host the SDK signs/sends requests against, passed to
+    # ApiClient.add_endpoint(region, base_url). This is a BARE HOST - no
+    # "https://" scheme, no path (the SDK adds those). Defaults to Webull's
+    # sandbox host for paper trading; point at the production host only when
+    # trading live. e.g. "api.sandbox.webull.com" (paper) / "api.webull.com".
+    webull_api_base_url: str = "api.sandbox.webull.com"
     webull_token_dir: str = ""
 
     # --- Order submission gating (§13) -------------------------------

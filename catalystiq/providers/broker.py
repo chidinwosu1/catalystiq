@@ -473,6 +473,6 @@ def get_broker_provider() -> BrokerProvider:
         settings.webull_app_secret,
         settings.webull_account_id,
         region_id=settings.webull_region_id,
-        api_endpoint=settings.webull_api_endpoint,
+        api_endpoint=settings.webull_api_base_url,
         token_dir=settings.webull_token_dir,
     )
