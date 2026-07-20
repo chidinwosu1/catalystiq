@@ -168,7 +168,7 @@ Environment variables (`catalystiq/config.py`):
 | `BROKER_PROVIDER` | Which `BrokerProvider` to use. Webull is the only supported value - anything else is rejected with a `BrokerError` (502), no fallback | `webull` |
 | `WEBULL_APP_KEY` / `WEBULL_APP_SECRET` / `WEBULL_ACCOUNT_ID` | Webull OpenAPI credentials ([apply here](https://developer.webull.com/apis/docs/authentication/apply/); shared test accounts also work without applying) | — (required) |
 | `WEBULL_REGION_ID` | Webull region, e.g. `us` or `hk` | `us` |
-| `WEBULL_API_ENDPOINT` | Override the SDK's resolved endpoint (e.g. to pin the sandbox host) | — (SDK default) |
+| `WEBULL_API_BASE_URL` | Bare host the SDK signs/sends against (no `https://`, no path). Sandbox for paper trading; production host only for live | `api.sandbox.webull.com` |
 | `WEBULL_TOKEN_DIR` | Where the SDK stores its 2FA token after the first call | — (SDK default, `conf/token.txt`) |
 | `DATABASE_URL` | SQLAlchemy URL. Defaults to a local SQLite file for dev; point at Postgres in production | `sqlite:///./catalystiq.db` |
 | `MARKET_DATA_PROVIDER` | Which `MarketDataProvider` to use | `yahoo` |
