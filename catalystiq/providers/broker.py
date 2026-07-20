@@ -23,7 +23,13 @@ import uuid
 from abc import ABC, abstractmethod
 
 from catalystiq.providers.base import DataDomain
-from catalystiq.schemas.broker import AccountInfo, NewOrder, Position
+from catalystiq.schemas.broker import (
+    AccountInfo,
+    BrokerAccount,
+    NewOrder,
+    OrderRecord,
+    Position,
+)
 
 
 class BrokerError(RuntimeError):
@@ -48,6 +54,28 @@ class BrokerProvider(ABC):
     @abstractmethod
     def get_orders(self) -> list[dict]:
         ...
+
+    # Read-only account enumeration and historical orders. These are concrete
+    # (not abstract) with a default that raises, so existing providers that
+    # don't implement them - e.g. the disabled AlpacaPaperBroker - keep working
+    # unchanged. WebullBroker overrides both.
+    def get_account_list(self) -> list[BrokerAccount]:
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support account enumeration."
+        )
+
+    def get_order_history(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        symbol: str | None = None,
+        filled_only: bool = False,
+        page_size: int = 100,
+        max_pages: int = 20,
+    ) -> list[OrderRecord]:
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support order history."
+        )
 
     @abstractmethod
     def submit_order(self, order: NewOrder) -> dict:
@@ -365,6 +393,127 @@ class WebullBroker(BrokerProvider):
         response = self._trade_client.order_v3.get_order_open(self._account_id)
         return self._check_response(response)
 
+    # --- Account enumeration (read-only) --------------------------------
+
+    def get_account_list_raw(self):
+        """Unmapped passthrough of GET /openapi/account/list
+        (account_v2.get_account_list). Takes no account id - it enumerates the
+        accounts the API credentials can see. Read-only."""
+        response = self._trade_client.account_v2.get_account_list()
+        return self._check_response(response)
+
+    def get_account_list(self) -> list[BrokerAccount]:
+        """Mapped account list. Read-only; never places or cancels an order."""
+        return _map_webull_accounts(self.get_account_list_raw())
+
+    def find_account_id(self, account_ref: str) -> str:
+        """Resolve a human-facing account reference (e.g. the "DEM34946"
+        account number, or the opaque API account id itself) to the exact
+        Webull `account_id`. Matches the account number first, then the id,
+        case-insensitively. Raises BrokerError if there is no unambiguous
+        match, listing the *count* of accounts seen - never their ids."""
+        ref = (account_ref or "").strip()
+        if not ref:
+            raise BrokerError("An account reference is required to resolve an account id.")
+        accounts = self.get_account_list()
+        ref_lower = ref.lower()
+        matches = [
+            a
+            for a in accounts
+            if ref_lower in {a.account_number.lower(), a.account_id.lower()}
+        ]
+        if len(matches) == 1:
+            return matches[0].account_id
+        if not matches:
+            raise BrokerError(
+                f"No account matching {account_ref!r} was found among the "
+                f"{len(accounts)} account(s) visible to these credentials."
+            )
+        raise BrokerError(
+            f"Account reference {account_ref!r} is ambiguous - it matched "
+            f"{len(matches)} accounts."
+        )
+
+    # --- Order history (read-only) --------------------------------------
+
+    def get_order_history_raw(
+        self,
+        page_size: int | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        last_client_order_id: str | None = None,
+    ):
+        """Unmapped passthrough of GET /openapi/trade/order/history
+        (order_v3.get_order_history). One page only. `start_date`/`end_date`
+        are yyyy-MM-dd; Webull defaults to the last 7 days when both are
+        omitted. Read-only."""
+        response = self._trade_client.order_v3.get_order_history(
+            self._account_id,
+            page_size=page_size,
+            start_date=start_date,
+            end_date=end_date,
+            last_client_order_id=last_client_order_id,
+        )
+        return self._check_response(response)
+
+    def get_order_history(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        symbol: str | None = None,
+        filled_only: bool = False,
+        page_size: int = 100,
+        max_pages: int = 20,
+    ) -> list[OrderRecord]:
+        """Complete, paginated, mapped order history. Walks Webull's
+        `last_client_order_id` cursor until a short/empty page is returned (or
+        `max_pages` is hit, a safety bound against an unexpected cursor loop),
+        then normalizes every row to an OrderRecord. Optional client-side
+        filters: `symbol` (case-insensitive) and `filled_only` (fully or
+        partially filled). Read-only - never places, modifies, or cancels an
+        order.
+
+        NOTE: Webull returns grouped/combo orders together, so a single page
+        may exceed `page_size`; the short-page stop keys off receiving *fewer
+        new rows than requested*, and de-dupes by (client_order_id, order_id)
+        so a boundary row repeated across pages is never double-counted.
+        """
+        records: list[OrderRecord] = []
+        seen: set[tuple[str, str]] = set()
+        cursor: str | None = None
+
+        for _ in range(max(1, max_pages)):
+            raw = self.get_order_history_raw(
+                page_size=page_size,
+                start_date=start_date,
+                end_date=end_date,
+                last_client_order_id=cursor,
+            )
+            page = _map_webull_orders(raw)
+            new_this_page = 0
+            last_cursor: str | None = None
+            for rec in page:
+                key = (rec.client_order_id, rec.order_id)
+                last_cursor = rec.client_order_id or last_cursor
+                if key in seen:
+                    continue
+                seen.add(key)
+                new_this_page += 1
+                records.append(rec)
+
+            # Stop when the page added nothing new, returned fewer rows than a
+            # full page, or gave us no cursor to advance with.
+            if new_this_page == 0 or len(page) < page_size or not last_cursor:
+                break
+            cursor = last_cursor
+
+        if symbol:
+            want = symbol.strip().upper()
+            records = [r for r in records if r.symbol.upper() == want]
+        if filled_only:
+            records = [r for r in records if r.is_filled]
+        return records
+
     def connection_test(self) -> dict:
         """Read-only reachability check (§13): performs a lightweight open-
         orders read and reports ok/failure without exposing any credential.
@@ -523,6 +672,162 @@ def _map_webull_positions(data) -> list[Position]:
                 unrealized_plpc=_num_str(p.get("unrealized_profit_loss_rate")),
                 current_price=_num_str(p.get("last_price")),
                 change_today=_num_str(p.get("day_profit_loss")),
+            )
+        )
+    return out
+
+
+def _first(row: dict, *keys, default=None):
+    """First present, non-None value among `keys` (tolerates the field-name
+    drift across Webull API versions)."""
+    for key in keys:
+        if key in row and row[key] is not None:
+            return row[key]
+    return default
+
+
+def _rows_from(data) -> list:
+    """Coerce a Webull list-or-wrapped-list response into a plain list of rows.
+    Webull variously returns a bare JSON array, or a dict wrapping it under
+    `data`/`accounts`/`orders`/`items`/`records`."""
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        for key in ("data", "accounts", "orders", "items", "records", "list"):
+            value = data.get(key)
+            if isinstance(value, list):
+                return value
+    return []
+
+
+def _map_webull_accounts(data) -> list[BrokerAccount]:
+    """Map GET /openapi/account/list to BrokerAccount rows. Tolerant of the
+    account-number/id field aliases Webull uses; keeps the raw row."""
+    out: list[BrokerAccount] = []
+    for row in _rows_from(data):
+        if not isinstance(row, dict):
+            continue
+        out.append(
+            BrokerAccount(
+                account_id=str(
+                    _first(row, "account_id", "accountId", "id", default="") or ""
+                ),
+                account_number=str(
+                    _first(row, "account_number", "accountNumber", "account_no", default="")
+                    or ""
+                ),
+                account_type=str(
+                    _first(row, "account_type", "accountType", "type", default="") or ""
+                ),
+                currency=str(_first(row, "currency", "total_asset_currency", default="") or ""),
+                status=str(_first(row, "status", "account_status", default="") or ""),
+                raw=row,
+            )
+        )
+    return out
+
+
+# Webull OrderStatus (webull.trade.common.order_status) plus the extra spellings
+# its REST payloads have used, normalized to the OrderStatusNorm literal.
+_ORDER_STATUS_NORM = {
+    "FILLED": "filled",
+    "PARTIAL FILLED": "partially_filled",
+    "PARTIAL_FILLED": "partially_filled",
+    "PARTIALLY_FILLED": "partially_filled",
+    "SUBMITTED": "open",
+    "PENDING": "open",
+    "WORKING": "open",
+    "PENDING_SUBMIT": "open",
+    "CANCELLED": "cancelled",
+    "CANCELED": "cancelled",
+    "FAILED": "failed",
+    "REJECTED": "failed",
+    "EXPIRED": "cancelled",
+}
+
+
+def _normalize_order_status(raw_status: str) -> str:
+    key = (raw_status or "").strip().upper().replace("-", "_")
+    if key in _ORDER_STATUS_NORM:
+        return _ORDER_STATUS_NORM[key]
+    # Tolerate "PARTIAL_FILLED" vs "PARTIAL FILLED" spacing already handled;
+    # collapse any remaining underscores/spaces for a last-chance match.
+    collapsed = key.replace("_", " ")
+    return _ORDER_STATUS_NORM.get(collapsed, "unknown")
+
+
+def _map_webull_orders(data) -> list[OrderRecord]:
+    """Map Webull's order-history / order-detail JSON to OrderRecords.
+
+    Field names are read through alias lists because Webull's REST payloads
+    aren't pinned by the SDK (the SDK is a thin HTTP client) and have drifted
+    across versions. For a combo/group order the symbol and per-leg fill data
+    may live on a nested leg under `items`/`orders`/`child_orders`; we fall back
+    to the first leg for those. The untouched row is preserved in `raw`."""
+    out: list[OrderRecord] = []
+    for row in _rows_from(data):
+        if not isinstance(row, dict):
+            continue
+
+        # A combo/group order carries its instrument + fills on a nested leg.
+        legs = _first(row, "items", "orders", "child_orders", "legs", default=None)
+        leg = legs[0] if isinstance(legs, list) and legs and isinstance(legs[0], dict) else {}
+
+        def pick(*keys, default=None):
+            # Prefer the top-level order field, then the leg.
+            value = _first(row, *keys, default=None)
+            if value is None:
+                value = _first(leg, *keys, default=None)
+            return default if value is None else value
+
+        status_raw = str(pick("order_status", "status", "statusStr", default="") or "")
+        out.append(
+            OrderRecord(
+                order_id=str(pick("order_id", "orderId", "id", default="") or ""),
+                client_order_id=str(
+                    pick("client_order_id", "clientOrderId", default="") or ""
+                ),
+                symbol=str(pick("symbol", "ticker", "instrument_symbol", default="") or ""),
+                side=str(pick("side", "order_side", default="") or ""),
+                order_type=str(pick("order_type", "orderType", default="") or ""),
+                time_in_force=str(pick("time_in_force", "timeInForce", "tif", default="") or ""),
+                status=_normalize_order_status(status_raw),
+                status_raw=status_raw,
+                total_qty=_num_str(
+                    pick("total_quantity", "quantity", "qty", "totalQuantity")
+                ),
+                filled_qty=_num_str(
+                    pick(
+                        "filled_quantity",
+                        "filledQuantity",
+                        "filled_qty",
+                        "cumulative_quantity",
+                        "cumQuantity",
+                    )
+                ),
+                avg_fill_price=_num_str(
+                    pick(
+                        "avg_fill_price",
+                        "avgFillPrice",
+                        "average_price",
+                        "avg_price",
+                        "avgPrice",
+                        "filled_price",
+                        "avgFilledPrice",
+                    )
+                ),
+                filled_amount=_num_str(
+                    pick("filled_amount", "filledAmount", "filled_value", "amount")
+                ),
+                commission=_num_str(pick("commission", "fee", "commission_amount"), default="0"),
+                created_at=str(
+                    pick("create_time", "created_time", "createTime", "create_time0", default="")
+                    or ""
+                ),
+                updated_at=str(
+                    pick("update_time", "updated_time", "updateTime", default="") or ""
+                ),
+                raw=row,
             )
         )
     return out

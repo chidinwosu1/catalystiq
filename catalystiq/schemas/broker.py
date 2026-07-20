@@ -81,6 +81,105 @@ class Position(BaseModel):
     change_today: str
 
 
+class BrokerAccount(BaseModel):
+    """One entry from the broker's account list (Webull
+    GET /openapi/account/list). `account_id` is the opaque API id used for
+    every subsequent call; `account_number` is the human-facing number a user
+    sees (e.g. "DEM34946"). The `raw` passthrough keeps the untouched Webull
+    row so unmapped fields stay inspectable."""
+
+    account_id: str
+    account_number: str = ""
+    account_type: str = ""
+    currency: str = ""
+    status: str = ""
+    raw: dict = Field(default_factory=dict)
+
+
+# Normalized order status. Webull's OrderStatus enum is SUBMITTED / CANCELLED /
+# FAILED / FILLED / PARTIAL FILLED (verified against the SDK's
+# webull.trade.common.order_status); other providers use different spellings,
+# so callers key off this normalized value and fall back to `status_raw`.
+OrderStatusNorm = Literal[
+    "filled", "partially_filled", "open", "cancelled", "failed", "unknown"
+]
+
+
+class OrderRecord(BaseModel):
+    """Provider-agnostic view of a single historical/open order, normalized
+    from Webull's order-history / order-detail JSON. Numbers stay strings
+    (Webull returns them as strings) and the untouched provider row is kept in
+    `raw` so nothing is lost to the mapping. Field names are tolerant of the
+    aliases Webull has used across API versions (see `_map_webull_orders`)."""
+
+    order_id: str = ""
+    client_order_id: str = ""
+    symbol: str = ""
+    side: str = ""
+    order_type: str = ""
+    time_in_force: str = ""
+    status: OrderStatusNorm = "unknown"
+    status_raw: str = ""
+    total_qty: str = "0"
+    filled_qty: str = "0"
+    avg_fill_price: str = "0"
+    filled_amount: str = "0"
+    commission: str = "0"
+    created_at: str = ""
+    updated_at: str = ""
+    raw: dict = Field(default_factory=dict)
+
+    @property
+    def is_filled(self) -> bool:
+        """True when the order put shares on the book (fully or partially)."""
+        return self.status in {"filled", "partially_filled"} and _as_float(self.filled_qty) > 0
+
+
+class ReconciliationCheck(BaseModel):
+    """One pass/fail assertion in a reconciliation, with the compared values so
+    a failure is self-explanatory."""
+
+    name: str
+    ok: bool
+    expected: Optional[str] = None
+    actual: Optional[str] = None
+    detail: str = ""
+
+
+class BuyingPowerReconciliation(BaseModel):
+    """Buying-power side of the reconciliation. A single read-only snapshot
+    can't by itself yield a before/after delta, so `expected_change` is the
+    fill's modeled cash impact and `actual_change` is populated only when the
+    caller supplies a pre-trade `baseline`."""
+
+    current: str
+    baseline: Optional[str] = None
+    expected_change: str
+    actual_change: Optional[str] = None
+    note: str = ""
+
+
+class OrderReconciliation(BaseModel):
+    """Result of reconciling one order against the resulting position and
+    account balance. `ok` is the AND of every check. Read-only: producing this
+    never places, modifies, or cancels an order."""
+
+    account_id: str
+    symbol: str
+    order: OrderRecord
+    position: Optional[Position] = None
+    buying_power: BuyingPowerReconciliation
+    checks: list[ReconciliationCheck] = Field(default_factory=list)
+    ok: bool = False
+
+
+def _as_float(value) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 class ScheduledOrderCreate(BaseModel):
     order: NewOrder
     scheduled_at: dt.datetime
