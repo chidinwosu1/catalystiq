@@ -67,7 +67,7 @@ def test_look_ahead_invariance():
 def test_unavailable_groups_recorded_missing_not_fabricated():
     prov = _provider({"AAPL": _series(), "SPY": _series(seed=4.0)})
     by = {f.feature_name: f for f in prov.get_features("AAPL", PT)}
-    for name in ("market_regime", "trading_days_to_earnings", "pit_revenue_yoy",
+    for name in ("trading_days_to_earnings", "pit_revenue_yoy",
                  "macro_cpi_yoy_pit", "recent_filing_event"):
         assert by[name].feature_value is None
         assert by[name].data_quality_status is DataQualityStatus.MISSING
@@ -126,7 +126,7 @@ def test_builder_integration_produces_labeled_examples():
     assert ex.entry_session > ex.prediction_timestamp
     assert ex.labels.net_terminal_return is not None
     # unavailable feature groups surface as recorded requirement gaps
-    assert "market_regime" in ex.requirement_gaps
+    assert "trading_days_to_earnings" in ex.requirement_gaps
 
 
 def test_manifest_reflects_wired_price_sources():

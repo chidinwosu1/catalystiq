@@ -116,13 +116,14 @@ so the feature vector is **look-ahead invariant**: identical whether or not
 future bars exist in the database (asserted in tests). `get_executable_entry`
 returns the *next* session's open (offline only; `None` at live inference).
 
-Wired now (35 features): adjusted OHLCV, trend/MA, momentum, RSI/MACD,
+Wired now (36 features): adjusted OHLCV, trend/MA, momentum, RSI/MACD,
 volatility/ATR, volume/relative-volume, liquidity/estimated-spread, gaps,
-market/sector, relative strength, beta, the Rule-Based Opportunity Score and
-its factor sub-scores, missingness indicators, and data-quality/freshness.
-Still recorded as gaps (MISSING, never fabricated): market regime, earnings
-proximity, point-in-time SEC fundamentals, macro vintages, support/resistance
-distances.
+market/sector, relative strength, beta, **market regime** (a versioned,
+deterministic trend×volatility classifier over point-in-time benchmark bars,
+`features/regime.py`), the Rule-Based Opportunity Score and its factor
+sub-scores, missingness indicators, and data-quality/freshness. Still recorded
+as gaps (MISSING, never fabricated): earnings proximity, point-in-time SEC
+fundamentals, macro vintages, support/resistance distances.
 
 ## Labels & executable entry
 
@@ -173,10 +174,11 @@ probabilities or demo values.
 
 1. **Real point-in-time data wiring** — *price-derived + rule-based groups are
    now wired* via `SilverPointInTimeProvider` (validated Silver bars + analysis
-   snapshots + the rule-based Opportunity Score contract). Remaining gaps to
-   wire before full-feature training: a versioned market-regime classifier, a
-   point-in-time earnings calendar, original+amended SEC PIT fundamentals,
-   BLS/BEA vintage (as-released) reads, and support/resistance distances. See
+   snapshots + the rule-based Opportunity Score contract + a versioned
+   point-in-time market-regime classifier). Remaining gaps to wire before
+   full-feature training: a point-in-time earnings calendar (needs a licensed,
+   timestamped feed), original+amended SEC PIT fundamentals, BLS/BEA vintage
+   (as-released) reads, and support/resistance distances. See
    `feature_requirements.json` for the live status of each group.
 2. **A real historical dataset** — successful/unsuccessful/**delisted**
    securities, point-in-time universe membership, corporate-action

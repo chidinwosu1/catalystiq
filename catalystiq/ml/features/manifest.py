@@ -67,8 +67,8 @@ _GROUP_STATUS: dict[FeatureGroup, tuple[SourceStatus, str]] = {
     ),
     FeatureGroup.BETA: (SourceStatus.WIRED, f"Wired via {_PIT} (beta vs benchmark on PIT bars)."),
     FeatureGroup.REGIME: (
-        SourceStatus.UNAVAILABLE,
-        "A validated, versioned market-regime classifier is not yet built (recorded MISSING).",
+        SourceStatus.WIRED,
+        f"Wired via {_PIT} using catalystiq.ml.features.regime (trend x volatility on PIT benchmark bars).",
     ),
     FeatureGroup.EARNINGS: (
         SourceStatus.UNAVAILABLE,

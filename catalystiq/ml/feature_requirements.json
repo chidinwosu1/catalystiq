@@ -4,12 +4,11 @@
   "note": "Machine-readable record of the point-in-time features each model family needs and whether a provider-neutral source is wired. Features without a wired source are recorded here, never fabricated. No model may train on real data until every feature it requires is 'wired'.",
   "counts_by_status": {
     "integration_exists_not_point_in_time": 7,
-    "unavailable": 2,
-    "wired": 35
+    "unavailable": 1,
+    "wired": 36
   },
   "blocking_unavailable": [
-    "earnings_proximity",
-    "market_regime"
+    "earnings_proximity"
   ],
   "requirements": [
     {
@@ -222,8 +221,8 @@
       "feature_name": "market_regime",
       "group": "market_regime",
       "description": "Regime classification code",
-      "source_status": "unavailable",
-      "source_note": "A validated, versioned market-regime classifier is not yet built (recorded MISSING).",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider using catalystiq.ml.features.regime (trend x volatility on PIT benchmark bars).",
       "required_by": [
         "model_1",
         "model_2",

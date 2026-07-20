@@ -240,8 +240,12 @@ class SilverPointInTimeProvider:
             mk("relative_strength_60d", _val(ctx.metrics, "relative_return_60d_vs_market") if ctx else None),
             mk("beta_60d", _val(risk.metrics, "beta_vs_benchmark") if risk else None),
         ]
+        # --- market regime (point-in-time, from validated benchmark bars) -
+        regime_code = snaps.regime.code if snaps.regime and snaps.regime.available else None
+        features.append(mk("market_regime", float(regime_code) if regime_code is not None else None))
+
         # --- groups with no validated PIT source yet (recorded, not faked)-
-        for name in ("market_regime", "trading_days_to_earnings",
+        for name in ("trading_days_to_earnings",
                      "pit_revenue_yoy", "pit_gross_margin", "recent_filing_event",
                      "macro_cpi_yoy_pit", "macro_gdp_qoq_pit"):
             features.append(mk(name, None, DataQualityStatus.MISSING))
@@ -288,7 +292,7 @@ class SilverPointInTimeProvider:
 
 # --- snapshot computation ---------------------------------------------------
 class _Snapshots:
-    __slots__ = ("tech", "risk", "vol", "ctx", "opportunity",
+    __slots__ = ("tech", "risk", "vol", "ctx", "opportunity", "regime",
                  "market_return_20d", "sector_return_20d")
 
 
@@ -313,6 +317,10 @@ def _compute_snapshots(symbol, bars, prediction_timestamp, benchmark_symbol, sec
     )
     s.market_return_20d = _window_return(market_bars, 20) if market_bars else None
     s.sector_return_20d = _window_return(sector_bars, 20) if sector_bars else None
+
+    from catalystiq.ml.features.regime import classify_market_regime
+
+    s.regime = classify_market_regime(market_bars, symbol=benchmark_symbol) if market_bars else None
 
     s.opportunity = build_opportunity_score(
         symbol, bars, now=prediction_timestamp,
