@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -24,6 +25,8 @@ from catalystiq.routers import (
 )
 from catalystiq.scheduler import scheduler_loop
 from catalystiq.validation.reference.scheduler import reference_validation_loop
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -105,6 +108,39 @@ def handle_broker_error(request: Request, exc: BrokerError) -> JSONResponse:
     CORSMiddleware entirely - the browser reports it as a CORS failure,
     which hides the real "credentials not configured" error."""
     return JSONResponse(status_code=502, content={"detail": str(exc)})
+
+
+def _error_cors_headers(request: Request) -> dict[str, str]:
+    """CORS headers to attach to an error response the CORS middleware won't
+    add itself. An otherwise-unhandled 500 is produced by Starlette's
+    ServerErrorMiddleware, which sits OUTSIDE CORSMiddleware, so without these
+    the browser can't read the response and misreports it as "Could not reach
+    the API" - hiding the real server error. Only echoes an allowed Origin."""
+    origin = request.headers.get("origin")
+    allowed = [o.strip() for o in get_settings().cors_allow_origins.split(",") if o.strip()]
+    if origin and origin in allowed:
+        return {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Vary": "Origin",
+        }
+    return {}
+
+
+@app.exception_handler(Exception)
+def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
+    """Return a CORS-headed 500 for any otherwise-unhandled error, and log the
+    full traceback. Without this, such errors bypass CORSMiddleware and the
+    browser reports them as "Could not reach the API", masking the real cause
+    (e.g. a response-validation error on /paper/account). The response names
+    the exception type (diagnostic, no secrets); the traceback goes to the
+    server logs."""
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal server error ({type(exc).__name__}). See server logs."},
+        headers=_error_cors_headers(request),
+    )
 
 
 @app.get("/")
