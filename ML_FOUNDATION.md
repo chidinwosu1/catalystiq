@@ -31,6 +31,7 @@ catalystiq/ml/
   features/
     schema.py              PointInTimeFeature + licensing/leakage gates
     provider.py            provider-NEUTRAL point-in-time interface (no direct provider calls)
+    pit_provider.py        SilverPointInTimeProvider - concrete PIT features over validated Silver
     manifest.py            machine-readable feature-requirement manifest
   labels/
     costs.py               spread/slippage/fees/market-impact model (versioned)
@@ -104,6 +105,51 @@ has no wired point-in-time source, that gap is recorded in the
 machine-readable manifest (`catalystiq/ml/feature_requirements.json`) — never
 fabricated.
 
+### Concrete point-in-time provider (`features/pit_provider.py`)
+
+`SilverPointInTimeProvider` is the first real implementation. It reads the
+app's **own validated Silver bars** (via `get_silver_bars`) and the existing
+analysis snapshots + the published `build_opportunity_score` contract — no
+external provider calls, no integration changes. All computation runs on bars
+truncated to the **last closed session at or before `prediction_timestamp`**,
+so the feature vector is **look-ahead invariant**: identical whether or not
+future bars exist in the database (asserted in tests). `get_executable_entry`
+returns the *next* session's open (offline only; `None` at live inference).
+
+Wired now (41 features): adjusted OHLCV, trend/MA, momentum, RSI/MACD,
+volatility/ATR, volume/relative-volume, liquidity/estimated-spread, gaps,
+**support/resistance distances** (nearest active level from the market-structure
+snapshot on point-in-time bars), market/sector, relative strength, beta,
+**market regime** (a versioned, deterministic trend×volatility classifier over
+point-in-time benchmark bars, `features/regime.py`), **point-in-time SEC
+fundamentals** (revenue YoY, gross margin, recent-filing flag — see below), the
+Rule-Based Opportunity Score and its factor sub-scores, missingness indicators,
+and data-quality/freshness. Still recorded as gaps (MISSING, never fabricated):
+earnings proximity, and the BLS/BEA macro features (see the vintage note below).
+
+### Point-in-time vintages: SEC, BLS, BEA (`features/fundamentals_pit.py`, `features/macro_pit.py`)
+
+These use **only the value/amendment released as of the prediction timestamp —
+never a later revision**:
+
+- **SEC fundamentals (truly point-in-time, wired).** XBRL facts are eligible
+  only if `filing_date <= as_of`; among eligible vintages of one
+  (concept, unit, period) the latest `filing_date` wins, so an amendment that
+  *was* public supersedes the original while one filed later is invisible.
+  `pit_revenue_yoy`, `pit_gross_margin`, and `recent_filing_event` are computed
+  with per-feature provenance (`available_at` = the governing filing date).
+  Fails closed (MISSING) when the CIK or required periods are absent.
+- **BLS (fails closed).** BLS observations carry no realtime vintage
+  (`realtime_start` is null; a revision overwrites in place), so a legitimate
+  as-of value cannot be established — `macro_cpi_yoy_pit` is MISSING. The
+  vintage read is written correctly and lights up automatically if a
+  vintage-preserving ingestion lands (a test proves the read against seeded
+  vintages, and that a future-dated revision is excluded).
+- **BEA (fails closed).** BEA values are stored current-state only (no realtime
+  dimension), so `macro_gdp_qoq_pit` is MISSING — the possibly-revised stored
+  value is never read.
+- **FRED** remains BLOCKED from ML features entirely.
+
 ## Labels & executable entry
 
 For end-of-day analysis: `prediction_timestamp = session close`,
@@ -151,11 +197,18 @@ probabilities or demo values.
 
 ## What remains before any model can be approved
 
-1. **Real point-in-time data wiring** — a concrete `PointInTimeFeatureProvider`
-   over validated OHLCV, SEC (original + amended), BLS/BEA vintage releases,
-   earnings calendar, and the rule-based Opportunity Score contract (PR #10).
-   See `feature_requirements.json` for the exact gaps (regime classifier,
-   earnings calendar, rule-based score are `unavailable`).
+1. **Real point-in-time data wiring** — *price-derived + rule-based groups are
+   now wired* via `SilverPointInTimeProvider` (validated Silver bars + analysis
+   snapshots + rule-based Opportunity Score + market-regime classifier +
+   **point-in-time SEC fundamentals** with amendment/vintage handling). The
+   **BLS/BEA vintage reads are implemented and fail closed** until a
+   vintage-preserving ingestion lands. Remaining before full-feature training:
+   a point-in-time earnings calendar (needs a licensed, timestamped feed),
+   vintage-preserving BLS/BEA ingestion (to activate the already-written macro
+   reads). Support/resistance distances are now wired. See
+   `feature_requirements.json` for the live status of each group. The only
+   `unavailable` group left is earnings proximity — it genuinely needs a
+   licensed, timestamped feed and is never fabricated or substituted.
 2. **A real historical dataset** — successful/unsuccessful/**delisted**
    securities, point-in-time universe membership, corporate-action
    adjustment, cost estimates, full provenance. No user-facing artifact may be

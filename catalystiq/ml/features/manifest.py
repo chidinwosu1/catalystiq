@@ -36,50 +36,61 @@ class SourceStatus(str, Enum):
 # Per-group source status and the reason. This is a deliberate, reviewed
 # mapping - it changes only when a real point-in-time source is actually
 # wired in a later phase.
+_PIT = "catalystiq.ml.features.pit_provider.SilverPointInTimeProvider"
+
 _GROUP_STATUS: dict[FeatureGroup, tuple[SourceStatus, str]] = {
     FeatureGroup.PRICE_OHLCV: (
-        SourceStatus.INTEGRATION_EXISTS_NOT_PIT,
-        "Validated OHLCV (Silver/Gold) exists; needs a point-in-time read adapter.",
+        SourceStatus.WIRED,
+        f"Wired: {_PIT} reads validated Silver bars truncated to <= prediction_timestamp.",
     ),
-    FeatureGroup.TREND: (SourceStatus.INTEGRATION_EXISTS_NOT_PIT, "Derivable from PIT OHLCV via the analysis engine."),
-    FeatureGroup.MOMENTUM: (SourceStatus.INTEGRATION_EXISTS_NOT_PIT, "Derivable from PIT OHLCV."),
-    FeatureGroup.OSCILLATOR: (SourceStatus.INTEGRATION_EXISTS_NOT_PIT, "RSI/MACD derivable from PIT OHLCV."),
-    FeatureGroup.VOLATILITY: (SourceStatus.INTEGRATION_EXISTS_NOT_PIT, "ATR/realized vol derivable from PIT OHLCV."),
-    FeatureGroup.VOLUME: (SourceStatus.INTEGRATION_EXISTS_NOT_PIT, "Derivable from PIT OHLCV."),
+    FeatureGroup.TREND: (SourceStatus.WIRED, f"Wired via {_PIT} (technical snapshot on PIT bars)."),
+    FeatureGroup.MOMENTUM: (SourceStatus.WIRED, f"Wired via {_PIT} (returns computed from PIT bars)."),
+    FeatureGroup.OSCILLATOR: (SourceStatus.WIRED, f"Wired via {_PIT} (RSI/MACD from PIT bars)."),
+    FeatureGroup.VOLATILITY: (SourceStatus.WIRED, f"Wired via {_PIT} (ATR/realized vol from PIT bars)."),
+    FeatureGroup.VOLUME: (SourceStatus.WIRED, f"Wired via {_PIT} (relative volume from PIT bars)."),
     FeatureGroup.LIQUIDITY: (
-        SourceStatus.INTEGRATION_EXISTS_NOT_PIT,
-        "Estimated spread/ADV available from volume-liquidity product; needs PIT read.",
+        SourceStatus.WIRED,
+        f"Wired via {_PIT} (estimated spread / ADV from the volume-liquidity product).",
     ),
-    FeatureGroup.GAPS: (SourceStatus.INTEGRATION_EXISTS_NOT_PIT, "Derivable from PIT OHLCV."),
+    FeatureGroup.GAPS: (SourceStatus.WIRED, f"Wired via {_PIT} (overnight gap from PIT bars)."),
     FeatureGroup.SUPPORT_RESISTANCE: (
-        SourceStatus.INTEGRATION_EXISTS_NOT_PIT,
-        "Market-structure product computes levels; needs PIT read.",
+        SourceStatus.WIRED,
+        f"Wired via {_PIT}: distance to the nearest ACTIVE support/resistance from the "
+        "market-structure snapshot on point-in-time bars; MISSING when no active level exists.",
     ),
     FeatureGroup.MARKET_SECTOR: (
-        SourceStatus.INTEGRATION_EXISTS_NOT_PIT,
-        "Market-context product exists; needs PIT sector/benchmark read.",
+        SourceStatus.WIRED,
+        f"Wired via {_PIT} when benchmark/sector Silver bars exist; else recorded MISSING.",
     ),
-    FeatureGroup.RELATIVE_STRENGTH: (SourceStatus.INTEGRATION_EXISTS_NOT_PIT, "From market-context product (PIT)."),
-    FeatureGroup.BETA: (SourceStatus.INTEGRATION_EXISTS_NOT_PIT, "From market-context product (PIT)."),
+    FeatureGroup.RELATIVE_STRENGTH: (
+        SourceStatus.WIRED,
+        f"Wired via {_PIT} (market-context relative strength on PIT bars).",
+    ),
+    FeatureGroup.BETA: (SourceStatus.WIRED, f"Wired via {_PIT} (beta vs benchmark on PIT bars)."),
     FeatureGroup.REGIME: (
-        SourceStatus.UNAVAILABLE,
-        "A validated, versioned market-regime classifier is not yet built.",
+        SourceStatus.WIRED,
+        f"Wired via {_PIT} using catalystiq.ml.features.regime (trend x volatility on PIT benchmark bars).",
     ),
     FeatureGroup.EARNINGS: (
         SourceStatus.UNAVAILABLE,
-        "Point-in-time earnings calendar from an approved licensed source not yet wired.",
+        "Point-in-time earnings calendar from an approved licensed source not yet wired (recorded MISSING).",
     ),
     FeatureGroup.FUNDAMENTALS: (
-        SourceStatus.INTEGRATION_EXISTS_NOT_PIT,
-        "SEC EDGAR filings ingested; needs original+amended PIT fundamentals read.",
+        SourceStatus.WIRED,
+        f"Wired: {_PIT} + catalystiq.ml.features.fundamentals_pit read SEC XBRL facts with "
+        "filing_date <= as_of and latest-vintage/amendment selection (revisions filed later are "
+        "never used). Fails closed (MISSING) when the CIK or required periods are absent.",
     ),
     FeatureGroup.MACRO: (
         SourceStatus.INTEGRATION_EXISTS_NOT_PIT,
-        "BLS/BEA ingested; needs as-released (vintage) PIT read. FRED is BLOCKED.",
+        "Strict vintage read implemented (catalystiq.ml.features.macro_pit): a value is used only "
+        "if released as of the prediction date. BLS carries no realtime vintage and BEA is stored "
+        "current-state only, so both FAIL CLOSED (MISSING) until a vintage-preserving ingestion "
+        "lands - the read then lights up automatically. FRED is BLOCKED.",
     ),
     FeatureGroup.RULE_BASED: (
-        SourceStatus.UNAVAILABLE,
-        "Consumes the rule-based Opportunity Score contract from PR #10 once published.",
+        SourceStatus.WIRED,
+        f"Wired: {_PIT} consumes the published build_opportunity_score contract (score + factor sub-scores).",
     ),
     FeatureGroup.MISSINGNESS: (SourceStatus.WIRED, "Emitted deterministically by the feature schema."),
     FeatureGroup.DATA_QUALITY: (SourceStatus.WIRED, "Computed from feature completeness/freshness."),
