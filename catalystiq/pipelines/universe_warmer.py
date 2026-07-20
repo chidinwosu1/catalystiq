@@ -62,17 +62,33 @@ def warm_universe(provider, db) -> dict[str, int]:
     return {"warmed": warmed, "skipped": skipped, "failed": failed}
 
 
+def warm_and_refresh(provider, db) -> dict[str, int]:
+    """Warm Silver for the universe, then precompute the ranked scan into the
+    cache so the user-facing request is a pure cache read (moving the CPU-heavy
+    scoring loop off the request path). Scan precompute failures are contained."""
+    import datetime as dt
+
+    from catalystiq.analysis.opportunity_score import refresh_scan_cache
+
+    result = warm_universe(provider, db)
+    try:
+        refresh_scan_cache(provider, db, now=dt.datetime.now(dt.timezone.utc))
+    except Exception:  # pragma: no cover - defensive; warming still succeeded
+        logger.exception("scan precompute failed")
+    return result
+
+
 async def universe_warm_loop(session_factory, provider_factory, interval_seconds: float) -> None:
-    """Run `warm_universe` immediately, then every `interval_seconds`, until
-    cancelled. The blocking ingest runs in a worker thread so it never stalls
-    the event loop. `session_factory`/`provider_factory` are injected for
-    testability."""
+    """Run `warm_and_refresh` immediately, then every `interval_seconds`, until
+    cancelled. The blocking ingest + precompute run in a worker thread so they
+    never stall the event loop. `session_factory`/`provider_factory` are
+    injected for testability."""
     while True:
         try:
             db = session_factory()
             try:
                 provider = provider_factory()
-                result = await asyncio.to_thread(warm_universe, provider, db)
+                result = await asyncio.to_thread(warm_and_refresh, provider, db)
                 logger.info("universe warm: %s", result)
             finally:
                 db.close()

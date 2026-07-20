@@ -189,9 +189,19 @@ class Settings(BaseSettings):
     market_data_rate_limit_cooldown_seconds: int = 300  # 5 minutes
 
     # --- Opportunity-scan performance --------------------------------------
-    # Short-TTL cache for the ranked universe scan, so repeated / concurrent
-    # loads reuse one computed result instead of re-running the whole loop.
-    opportunity_scan_cache_ttl_seconds: int = 60
+    # Scoring is CPU-bound: each symbol computes five analytical snapshots, and
+    # the score's longest indicator lookback is ~200 sessions, so feeding it 5y
+    # of bars is ~3x wasted work. Cap the bars used for SCORING only (ingestion
+    # and other analyses still keep full history); verified score-identical vs
+    # full history in tests.
+    scoring_max_bars: int = 300
+
+    # The ranked universe scan is served from a cache that the background warmer
+    # refreshes each pass, so the user request is a pure cache read instead of a
+    # ~tens-of-seconds scoring loop. The TTL is the fallback staleness bound if
+    # the warmer stalls; it is intentionally longer than the warm interval so a
+    # warmed entry is always served between passes.
+    opportunity_scan_cache_ttl_seconds: int = 1800  # 30 min (fallback bound)
 
     # Background universe warmer: keeps Silver fresh for the scan universe
     # (+ SPY + governed sector ETFs) so the user-facing scan is warm (DB-only,
