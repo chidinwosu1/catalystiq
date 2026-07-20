@@ -19,6 +19,7 @@ any router or the frontend.
 """
 from __future__ import annotations
 
+import threading
 import uuid
 from abc import ABC, abstractmethod
 
@@ -835,6 +836,25 @@ def _map_webull_orders(data) -> list[OrderRecord]:
 
 _SUPPORTED_BROKER_PROVIDERS = {"webull"}
 
+# Cache the constructed broker so each request doesn't rebuild the Webull client.
+# `WebullBroker.__init__` performs a network call when it builds `TradeClient`
+# (endpoint/config resolution), so reconstructing it on every `/paper/*` request
+# - which `get_broker_provider` does as a per-request FastAPI dependency - added
+# seconds of latency per call and, with the frontend polling account/positions
+# every 15s, kept the sync threadpool busy. Reuse is safe: Webull request auth is
+# per-call HMAC (no session token that expires), so a single client stays valid.
+# Keyed on the exact credentials so a settings change (e.g. tests clearing
+# get_settings) transparently builds a fresh client; only successful builds are
+# cached, so a missing-credential BrokerError still surfaces on every request.
+_broker_cache: dict[tuple, BrokerProvider] = {}
+_broker_cache_lock = threading.Lock()
+
+
+def reset_broker_cache() -> None:
+    """Drop any cached broker instance. Test-support / config-reload hook."""
+    with _broker_cache_lock:
+        _broker_cache.clear()
+
 
 def get_broker_provider() -> BrokerProvider:
     """Factory returning the active BrokerProvider - always WebullBroker.
@@ -844,6 +864,9 @@ def get_broker_provider() -> BrokerProvider:
     is caught by the app-level `@app.exception_handler(BrokerError)` and
     turned into a clean 502 JSON response - never an unhandled 500, and
     never a silent fallback to any other broker.
+
+    The constructed broker is cached and reused across requests (see
+    `_broker_cache` above); construction failures are never cached.
     """
     from catalystiq.config import get_settings
 
@@ -855,14 +878,33 @@ def get_broker_provider() -> BrokerProvider:
             "sole active broker and there is no fallback to any other provider."
         )
 
-    return WebullBroker(
+    key = (
         settings.webull_app_key,
         settings.webull_app_secret,
         settings.webull_account_id,
-        region_id=settings.webull_region_id,
-        api_endpoint=settings.webull_api_base_url,
-        token_dir=settings.webull_token_dir,
+        settings.webull_region_id,
+        settings.webull_api_base_url,
+        settings.webull_token_dir,
     )
+    cached = _broker_cache.get(key)
+    if cached is not None:
+        return cached
+
+    with _broker_cache_lock:
+        # Double-checked: another thread may have built it while we waited.
+        cached = _broker_cache.get(key)
+        if cached is not None:
+            return cached
+        broker = WebullBroker(
+            settings.webull_app_key,
+            settings.webull_app_secret,
+            settings.webull_account_id,
+            region_id=settings.webull_region_id,
+            api_endpoint=settings.webull_api_base_url,
+            token_dir=settings.webull_token_dir,
+        )
+        _broker_cache[key] = broker
+        return broker
 
 
 def _normalize_webull_host(value: str | None) -> str:
