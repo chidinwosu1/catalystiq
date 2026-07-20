@@ -18,6 +18,7 @@ from catalystiq.config import Settings, get_settings
 from catalystiq.db import models
 from catalystiq.db.base import get_db
 from catalystiq.providers import registry
+from catalystiq.providers.fetch_tracker import get_last_fetch
 
 router = APIRouter(
     prefix="/data-sources",
@@ -46,6 +47,11 @@ def _health_for(source: registry.SourceDescriptor, settings: Settings, db: Sessi
     keys = _provider_keys(source.name)
     missing = registry.missing_settings(source.name, settings)
 
+    # On-demand fetch time (in-process): for sources served per request rather
+    # than on a schedule, this is the honest "freshness" signal - the Bronze
+    # ingestion timestamps below are null for them by design.
+    last_fetched = get_last_fetch(source.name)
+
     # Ephemeral sources (e.g. the compliance-isolated FRED) are never persisted,
     # so there are no ingestion runs to report - a null "last ingest" is
     # expected and correct, not a staleness signal.
@@ -65,6 +71,7 @@ def _health_for(source: registry.SourceDescriptor, settings: Settings, db: Sessi
             "last_failure_at": None,
             "circuit_breaker": "not_tracked",
             "data_freshness_at": None,
+            "last_fetched_at": _iso(last_fetched),
             "note": "Ephemeral (no-store): fetched on demand, never persisted.",
         }
 
@@ -102,6 +109,7 @@ def _health_for(source: registry.SourceDescriptor, settings: Settings, db: Sessi
         # layer and not persisted, so it isn't reported here.
         "circuit_breaker": "not_tracked",
         "data_freshness_at": _iso(last_success),
+        "last_fetched_at": _iso(last_fetched),
         "ephemeral": False,
     }
 
