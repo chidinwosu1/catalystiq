@@ -25,6 +25,13 @@ import argparse
 import datetime as dt
 import json
 import sys
+import time
+
+
+def _log(msg: str) -> None:
+    """Progress goes to STDERR so the report JSON on stdout stays clean for
+    redirection to a file."""
+    print(f"[validate_history] {msg}", file=sys.stderr, flush=True)
 
 from catalystiq.config import Settings
 from catalystiq.ml import flags
@@ -78,12 +85,10 @@ def _ingest(symbols, benchmark, db, *, start: dt.date) -> list[str]:
     return warnings
 
 
-def _build_multi_horizon(provider, symbols, dates, direction, horizons, *, is_synthetic):
+def _build_multi_horizon(provider, symbols, dates, direction, horizons, *, is_synthetic, progress=False):
     """Build one TrainingDataset per horizon, computing each (symbol, date)
     feature vector ONCE and reusing it across horizons. Returns
     (datasets, per_symbol_counts, dated_vectors)."""
-    from catalystiq.ml.labels.barriers import Bar  # noqa: F401 (type reference)
-
     max_h = max(horizons)
     datasets = {h: TrainingDataset(is_synthetic=is_synthetic,
                                    source_providers=["computed", "sec_edgar", "bls", "bea"])
@@ -91,9 +96,24 @@ def _build_multi_horizon(provider, symbols, dates, direction, horizons, *, is_sy
     per_symbol = {s.upper(): {"usable": 0, "skipped": 0} for s in symbols}
     dated_vectors: list[tuple[dt.datetime, dict]] = []
 
+    total = len(symbols) * len(dates)
+    done = 0
+    start_t = time.monotonic()
+    tick = max(1, total // 40)  # ~2.5% increments
+    if progress:
+        _log(f"building point-in-time features for {total} (symbol, date) pairs "
+             f"[{len(symbols)} symbols x {len(dates)} dates], reused across horizons {horizons}...")
+
     for sym in symbols:
         sym = sym.upper()
         for ts in dates:
+            done += 1
+            if progress and (done % tick == 0 or done == total):
+                elapsed = time.monotonic() - start_t
+                rate = done / elapsed if elapsed > 0 else 0
+                eta = (total - done) / rate if rate > 0 else 0
+                _log(f"features {done}/{total} ({done*100//total}%) | "
+                     f"elapsed {elapsed/60:.1f} min | ETA ~{eta/60:.1f} min | latest {sym}@{ts.date()}")
             raw = provider.get_features(sym, ts)
             vector, rejections = build_feature_vector(raw, for_training=True, strict=True)
             present = sum(1 for n in FEATURE_CATALOG if vector.get(missing_indicator_name(n)) == 0)
@@ -157,6 +177,7 @@ def run_history_validation(
     max_missing_ratio: float = 0.02,
     max_gap_sessions: int = 5,
     audit_only: bool = False,
+    progress: bool = False,
 ) -> dict:
     """Audit coverage, fail closed if incomplete, else run per-horizon dry-run
     diagnostics. Returns a JSON-able report dict.
@@ -173,6 +194,9 @@ def run_history_validation(
     from catalystiq.pipelines.market_price_pipeline import get_silver_bars
 
     # 1) Coverage audit (fast; DB + calendar only).
+    if progress:
+        _log(f"auditing Silver coverage for {len(symbols)+1} symbols "
+             f"({start.isoformat()} -> {end.isoformat()})...")
     coverage = {}
     for sym in [*symbols, benchmark]:
         bar_dates = [b.date for b in get_silver_bars(sym, db)]
@@ -196,6 +220,9 @@ def run_history_validation(
 
     # Audit-only: return the full per-symbol coverage report and STOP here -
     # before any feature building or model training, even if coverage passes.
+    if progress:
+        _log(f"coverage audit complete: {len(coverage) - len(incomplete)}/{len(coverage)} symbols complete"
+             + (f"; incomplete: {', '.join(incomplete)}" if incomplete else ""))
     if audit_only:
         report["mode"] = "audit_only"
         report["all_symbols_complete"] = not incomplete
@@ -217,6 +244,7 @@ def run_history_validation(
     dates = _prediction_dates(start, end, step_days)
     datasets, per_symbol, dated_vectors = _build_multi_horizon(
         provider, symbols, dates, direction, horizons, is_synthetic=is_synthetic_data,
+        progress=progress,
     )
 
     report["per_symbol_examples"] = per_symbol
@@ -225,6 +253,8 @@ def run_history_validation(
 
     horizon_reports = {}
     for h in horizons:
+        if progress:
+            _log(f"running chronological dry-run diagnostics for horizon {h}...")
         rep = run_training_dry_run(
             db, dataset=datasets[h], horizon_days=h, direction=direction,
             settings=settings, min_examples_to_fit=60,
@@ -312,7 +342,7 @@ def main(argv: list[str] | None = None, *, db=None) -> int:
             horizons=horizons, step_days=args.step_days, direction=args.direction,
             settings=settings, require_complete_history=not args.allow_incomplete_history,
             max_missing_ratio=args.max_missing_ratio, max_gap_sessions=args.max_gap_sessions,
-            audit_only=args.audit_only,
+            audit_only=args.audit_only, progress=True,
         )
     finally:
         if owns_db:
