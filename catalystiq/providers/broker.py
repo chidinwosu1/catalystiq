@@ -296,22 +296,29 @@ class WebullBroker(BrokerProvider):
         if not app_key or not app_secret or not account_id:
             raise BrokerError("Webull app_key, app_secret, and account_id are not configured.")
 
-        from webull.core.client import ApiClient
-        from webull.trade.trade_client import TradeClient
-
         self._account_id = account_id
         self._market = self._MARKET_BY_REGION.get(region_id, region_id.upper())
 
-        api_client = ApiClient(app_key, app_secret, region_id)
-        if api_endpoint:
-            api_client.add_endpoint(region_id, api_endpoint)
-        if token_dir:
-            api_client.set_token_dir(token_dir)
+        # The SDK import + client construction can fail in ways that are NOT
+        # BrokerError (an ImportError if the SDK is missing, or an SDK/network
+        # exception - TradeClient's constructor makes a network token/config
+        # call). Wrap them so any construction failure surfaces as a clean 502
+        # with a real reason, instead of an unhandled 500 that bypasses CORS and
+        # shows in the browser as a misleading "Could not reach the API".
+        try:
+            from webull.core.client import ApiClient
+            from webull.trade.trade_client import TradeClient
 
-        # TradeClient's constructor itself makes a network call (token/config
-        # check), so it can't be built lazily per-call the way the Yahoo/Alpaca
-        # clients are - it happens once, here, at broker construction.
-        self._trade_client = TradeClient(api_client)
+            api_client = ApiClient(app_key, app_secret, region_id)
+            if api_endpoint:
+                api_client.add_endpoint(region_id, api_endpoint)
+            if token_dir:
+                api_client.set_token_dir(token_dir)
+            self._trade_client = TradeClient(api_client)
+        except BrokerError:
+            raise
+        except Exception as exc:
+            raise BrokerError(f"Failed to initialize the Webull client: {exc}") from exc
 
     @staticmethod
     def _check_response(response, not_found: bool = False):
