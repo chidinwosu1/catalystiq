@@ -278,6 +278,10 @@ export interface DataSourceHealth extends DataSourceSummary {
   last_failure_at: string | null;
   circuit_breaker: string;
   data_freshness_at: string | null;
+  // Last successful on-demand fetch (in-process). Populated for sources served
+  // live per request rather than via scheduled ingestion; null when the source
+  // hasn't been fetched in this backend process.
+  last_fetched_at: string | null;
   note?: string;
 }
 

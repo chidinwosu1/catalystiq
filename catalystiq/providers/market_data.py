@@ -10,6 +10,7 @@ import datetime as dt
 from abc import ABC, abstractmethod
 
 from catalystiq.providers.base import DataDomain
+from catalystiq.providers.fetch_tracker import record_fetch
 from catalystiq.schemas.market_data import (
     FundamentalsSnapshot,
     NewsItem,
@@ -85,6 +86,7 @@ class YahooFinanceProvider(MarketDataProvider):
         if price is None:
             raise MarketDataError(f"No quote available for {symbol}")
 
+        record_fetch(self.PROVIDER_NAME)
         return Quote(
             symbol=symbol.upper(),
             price=float(price),
@@ -110,6 +112,7 @@ class YahooFinanceProvider(MarketDataProvider):
         except Exception as exc:  # pragma: no cover - network/library errors
             raise MarketDataError(f"Failed to fetch OHLCV for {symbol}: {exc}") from exc
 
+        record_fetch(self.PROVIDER_NAME)
         if df.empty:
             return []
 
@@ -133,6 +136,7 @@ class YahooFinanceProvider(MarketDataProvider):
         except Exception as exc:  # pragma: no cover - network/library errors
             raise MarketDataError(f"Failed to fetch fundamentals for {symbol}: {exc}") from exc
 
+        record_fetch(self.PROVIDER_NAME)
         return FundamentalsSnapshot(
             symbol=symbol.upper(),
             long_name=info.get("longName") or info.get("shortName"),
@@ -160,6 +164,7 @@ class YahooFinanceProvider(MarketDataProvider):
         except Exception as exc:  # pragma: no cover - network/library errors
             raise MarketDataError(f"Failed to fetch news for {symbol}: {exc}") from exc
 
+        record_fetch(self.PROVIDER_NAME)
         items: list[NewsItem] = []
         for raw in raw_items[:limit]:
             content = raw.get("content", raw)

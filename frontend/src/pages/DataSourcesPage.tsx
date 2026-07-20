@@ -126,22 +126,47 @@ export default function DataSourcesPage() {
                   </div>
                 </div>
 
-                <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-ink-secondary sm:grid-cols-3">
-                  <div>
-                    <span className="text-ink-muted">Last ingest</span>
-                    <div className="text-ink-primary">{timeAgo(s.last_successful_ingestion_at)}</div>
-                  </div>
-                  <div>
-                    <span className="text-ink-muted">Freshness</span>
-                    <div className="text-ink-primary">{timeAgo(s.data_freshness_at)}</div>
-                  </div>
-                  <div>
-                    <span className="text-ink-muted">Last failure</span>
-                    <div className={s.last_failure_category ? "text-status-critical" : "text-ink-primary"}>
-                      {s.last_failure_category ?? "none"}
-                    </div>
-                  </div>
-                </div>
+                {/* A source served live per request has no scheduled ingestion,
+                    so its freshness is the last on-demand fetch, not a blank. */}
+                {(() => {
+                  const isContinuous = !s.last_successful_ingestion_at && !!s.last_fetched_at;
+                  return (
+                    <>
+                      <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-ink-secondary sm:grid-cols-3">
+                        <div>
+                          <span className="text-ink-muted">
+                            {isContinuous ? "Last fetched" : "Last ingest"}
+                          </span>
+                          <div className="text-ink-primary">
+                            {timeAgo(s.last_successful_ingestion_at ?? s.last_fetched_at)}
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-ink-muted">Freshness</span>
+                          <div className="text-ink-primary">
+                            {timeAgo(s.data_freshness_at ?? s.last_fetched_at)}
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-ink-muted">Last failure</span>
+                          <div
+                            className={
+                              s.last_failure_category ? "text-status-critical" : "text-ink-primary"
+                            }
+                          >
+                            {s.last_failure_category ?? "none"}
+                          </div>
+                        </div>
+                      </div>
+                      {isContinuous && (
+                        <p className="mt-2 flex items-center gap-1.5 text-[11px] text-status-good">
+                          <span className="h-1.5 w-1.5 rounded-full bg-status-good" />
+                          Updated continuously — fetched live on demand
+                        </p>
+                      )}
+                    </>
+                  );
+                })()}
 
                 {s.missing_settings.length > 0 && (
                   <p className="mt-2 text-[11px] text-status-warning">

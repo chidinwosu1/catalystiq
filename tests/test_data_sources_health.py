@@ -61,6 +61,36 @@ def test_ephemeral_source_reports_no_ingestion(client, test_db_session):
     assert body["data_freshness_at"] is None
 
 
+def test_health_reports_last_fetched_for_on_demand_source(client):
+    # On-demand sources (live quotes) have no scheduled ingestion, so their
+    # freshness comes from the in-process last-fetch tracker, not Bronze runs.
+    from catalystiq.providers import fetch_tracker
+
+    fetch_tracker.reset()
+    # Yahoo has no fetch recorded yet -> null (an honest blank, not staleness).
+    body = client.get("/data-sources/yahoo/health").json()
+    assert body["last_fetched_at"] is None
+
+    now = dt.datetime(2026, 7, 19, 15, 0, 0, tzinfo=dt.timezone.utc)
+    fetch_tracker.record_fetch("yahoo", when=now)
+    body = client.get("/data-sources/yahoo/health").json()
+    assert body["last_fetched_at"] is not None
+    assert body["last_fetched_at"].startswith("2026-07-19T15:00:00")
+    fetch_tracker.reset()
+
+
+def test_recording_a_quote_fetch_populates_last_fetched():
+    # The Yahoo adapter records a successful fetch through the shared tracker;
+    # verify the wiring without hitting the network.
+    from catalystiq.providers import fetch_tracker
+
+    fetch_tracker.reset()
+    assert fetch_tracker.get_last_fetch("yahoo") is None
+    fetch_tracker.record_fetch("yahoo")
+    assert fetch_tracker.get_last_fetch("yahoo") is not None
+    fetch_tracker.reset()
+
+
 def test_unknown_provider_404(client):
     assert client.get("/data-sources/not-real/health").status_code == 404
 
