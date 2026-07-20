@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from catalystiq.analysis.market_context import SECTOR_ETF_MAP
-from catalystiq.analysis.opportunity_score import scan_universe, score_symbol
+from catalystiq.analysis.opportunity_score import scan_universe_cached, score_symbol
 from catalystiq.auth import verify_action_key
 from catalystiq.db.base import get_db
 from catalystiq.pipelines.market_price_pipeline import GoldProduct, build_gold, ensure_fresh
@@ -93,7 +93,7 @@ def get_opportunity_scan(
     universe = None
     if symbols:
         universe = [s.strip().upper() for s in symbols.split(",") if s.strip()]
-    return scan_universe(
+    return scan_universe_cached(
         provider, db, now=dt.datetime.now(dt.timezone.utc), top=top, universe=universe
     )
 

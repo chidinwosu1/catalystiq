@@ -162,8 +162,15 @@ def ingest_bronze(
     db.add(run)
     db.flush()
 
+    from catalystiq.providers.market_data_gate import get_gate_for
+
     try:
-        bars = provider.get_ohlcv(symbol, start=start, interval=interval)
+        # Governed: concurrency-capped + rate-limit circuit-breaker cooldown,
+        # so a cold scan can't hammer (or hang on) a throttled Yahoo endpoint.
+        bars = get_gate_for(provider).run(
+            f"ohlcv {symbol}",
+            lambda: provider.get_ohlcv(symbol, start=start, interval=interval),
+        )
     except MarketDataError as exc:
         run.status = "failed"
         run.completed_at = _now()
@@ -205,10 +212,12 @@ def ingest_bronze_quote(
     never blocks Bronze/Silver from proceeding without it - the caller
     just gets no live-quote cross-check for this build, same as if no
     quote had ever been requested."""
+    from catalystiq.providers.market_data_gate import get_gate_for
+
     symbol = symbol.upper()
     ticker = _get_or_create_ticker(db, symbol)
     try:
-        quote = provider.get_quote(symbol)
+        quote = get_gate_for(provider).run(f"quote {symbol}", lambda: provider.get_quote(symbol))
     except MarketDataError:
         return None
 
