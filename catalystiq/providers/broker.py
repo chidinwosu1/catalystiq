@@ -293,6 +293,18 @@ class WebullBroker(BrokerProvider):
         api_endpoint: str = "",
         token_dir: str = "",
     ) -> None:
+        # Strip surrounding whitespace: credentials pasted into a hosting
+        # dashboard (e.g. Render) very commonly pick up a trailing newline or
+        # space. The request signature is an HMAC over the app_key + secret, so
+        # a stray whitespace char silently produces "Header x-signature is
+        # invalid" (HTTP 401) from Webull rather than an obvious config error.
+        app_key = (app_key or "").strip()
+        app_secret = (app_secret or "").strip()
+        account_id = (account_id or "").strip()
+        region_id = (region_id or "us").strip() or "us"
+        api_endpoint = (api_endpoint or "").strip()
+        token_dir = (token_dir or "").strip()
+
         if not app_key or not app_secret or not account_id:
             raise BrokerError("Webull app_key, app_secret, and account_id are not configured.")
 
