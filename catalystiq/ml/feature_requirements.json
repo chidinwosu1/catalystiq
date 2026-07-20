@@ -3,22 +3,21 @@
   "generated_by": "catalystiq.ml.features.manifest",
   "note": "Machine-readable record of the point-in-time features each model family needs and whether a provider-neutral source is wired. Features without a wired source are recorded here, never fabricated. No model may train on real data until every feature it requires is 'wired'.",
   "counts_by_status": {
-    "integration_exists_not_point_in_time": 36,
-    "unavailable": 6,
-    "wired": 2
+    "integration_exists_not_point_in_time": 7,
+    "unavailable": 2,
+    "wired": 35
   },
   "blocking_unavailable": [
     "earnings_proximity",
-    "market_regime",
-    "rule_based_opportunity_score"
+    "market_regime"
   ],
   "requirements": [
     {
       "feature_name": "adj_close",
       "group": "adjusted_ohlcv",
       "description": "Split/dividend-adjusted close",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Validated OHLCV (Silver/Gold) exists; needs a point-in-time read adapter.",
+      "source_status": "wired",
+      "source_note": "Wired: catalystiq.ml.features.pit_provider.SilverPointInTimeProvider reads validated Silver bars truncated to <= prediction_timestamp.",
       "required_by": [
         "model_1",
         "model_2",
@@ -31,8 +30,8 @@
       "feature_name": "adj_high",
       "group": "adjusted_ohlcv",
       "description": "Adjusted high",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Validated OHLCV (Silver/Gold) exists; needs a point-in-time read adapter.",
+      "source_status": "wired",
+      "source_note": "Wired: catalystiq.ml.features.pit_provider.SilverPointInTimeProvider reads validated Silver bars truncated to <= prediction_timestamp.",
       "required_by": [
         "model_1",
         "model_2",
@@ -45,8 +44,8 @@
       "feature_name": "adj_low",
       "group": "adjusted_ohlcv",
       "description": "Adjusted low",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Validated OHLCV (Silver/Gold) exists; needs a point-in-time read adapter.",
+      "source_status": "wired",
+      "source_note": "Wired: catalystiq.ml.features.pit_provider.SilverPointInTimeProvider reads validated Silver bars truncated to <= prediction_timestamp.",
       "required_by": [
         "model_1",
         "model_2",
@@ -59,8 +58,8 @@
       "feature_name": "adj_open",
       "group": "adjusted_ohlcv",
       "description": "Adjusted open",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Validated OHLCV (Silver/Gold) exists; needs a point-in-time read adapter.",
+      "source_status": "wired",
+      "source_note": "Wired: catalystiq.ml.features.pit_provider.SilverPointInTimeProvider reads validated Silver bars truncated to <= prediction_timestamp.",
       "required_by": [
         "model_1",
         "model_2",
@@ -73,8 +72,8 @@
       "feature_name": "log_return_1d",
       "group": "adjusted_ohlcv",
       "description": "1-day log return",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Validated OHLCV (Silver/Gold) exists; needs a point-in-time read adapter.",
+      "source_status": "wired",
+      "source_note": "Wired: catalystiq.ml.features.pit_provider.SilverPointInTimeProvider reads validated Silver bars truncated to <= prediction_timestamp.",
       "required_by": [
         "model_1",
         "model_2",
@@ -87,8 +86,8 @@
       "feature_name": "log_return_20d",
       "group": "adjusted_ohlcv",
       "description": "20-day log return",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Validated OHLCV (Silver/Gold) exists; needs a point-in-time read adapter.",
+      "source_status": "wired",
+      "source_note": "Wired: catalystiq.ml.features.pit_provider.SilverPointInTimeProvider reads validated Silver bars truncated to <= prediction_timestamp.",
       "required_by": [
         "model_1",
         "model_2",
@@ -101,8 +100,8 @@
       "feature_name": "log_return_5d",
       "group": "adjusted_ohlcv",
       "description": "5-day log return",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Validated OHLCV (Silver/Gold) exists; needs a point-in-time read adapter.",
+      "source_status": "wired",
+      "source_note": "Wired: catalystiq.ml.features.pit_provider.SilverPointInTimeProvider reads validated Silver bars truncated to <= prediction_timestamp.",
       "required_by": [
         "model_1",
         "model_2",
@@ -115,8 +114,8 @@
       "feature_name": "beta_60d",
       "group": "beta",
       "description": "60-day beta",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "From market-context product (PIT).",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider (beta vs benchmark on PIT bars).",
       "required_by": [
         "model_3",
         "model_4"
@@ -155,7 +154,7 @@
       "group": "earnings_proximity",
       "description": "Sessions until next earnings",
       "source_status": "unavailable",
-      "source_note": "Point-in-time earnings calendar from an approved licensed source not yet wired.",
+      "source_note": "Point-in-time earnings calendar from an approved licensed source not yet wired (recorded MISSING).",
       "required_by": [
         "model_1",
         "model_3",
@@ -166,8 +165,8 @@
       "feature_name": "overnight_gap_pct",
       "group": "gaps",
       "description": "Overnight gap %",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Derivable from PIT OHLCV.",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider (overnight gap from PIT bars).",
       "required_by": [
         "model_3",
         "model_5"
@@ -177,8 +176,8 @@
       "feature_name": "adv_dollar_20d",
       "group": "liquidity_spread",
       "description": "Avg daily dollar volume",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Estimated spread/ADV available from volume-liquidity product; needs PIT read.",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider (estimated spread / ADV from the volume-liquidity product).",
       "required_by": [
         "model_3",
         "model_4"
@@ -188,8 +187,8 @@
       "feature_name": "estimated_spread_bps",
       "group": "liquidity_spread",
       "description": "Estimated bid/ask spread",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Estimated spread/ADV available from volume-liquidity product; needs PIT read.",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider (estimated spread / ADV from the volume-liquidity product).",
       "required_by": [
         "model_3",
         "model_4"
@@ -200,7 +199,7 @@
       "group": "macro_bls_bea",
       "description": "BLS CPI YoY as released",
       "source_status": "integration_exists_not_point_in_time",
-      "source_note": "BLS/BEA ingested; needs as-released (vintage) PIT read. FRED is BLOCKED.",
+      "source_note": "BLS/BEA ingested; as-released (vintage) PIT read not yet mapped (recorded MISSING). FRED is BLOCKED.",
       "required_by": [
         "model_2",
         "model_4",
@@ -212,7 +211,7 @@
       "group": "macro_bls_bea",
       "description": "BEA GDP QoQ as released",
       "source_status": "integration_exists_not_point_in_time",
-      "source_note": "BLS/BEA ingested; needs as-released (vintage) PIT read. FRED is BLOCKED.",
+      "source_note": "BLS/BEA ingested; as-released (vintage) PIT read not yet mapped (recorded MISSING). FRED is BLOCKED.",
       "required_by": [
         "model_2",
         "model_4",
@@ -224,7 +223,7 @@
       "group": "market_regime",
       "description": "Regime classification code",
       "source_status": "unavailable",
-      "source_note": "A validated, versioned market-regime classifier is not yet built.",
+      "source_note": "A validated, versioned market-regime classifier is not yet built (recorded MISSING).",
       "required_by": [
         "model_1",
         "model_2",
@@ -237,8 +236,8 @@
       "feature_name": "market_return_20d",
       "group": "market_sector_performance",
       "description": "Benchmark 20d return",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Market-context product exists; needs PIT sector/benchmark read.",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider when benchmark/sector Silver bars exist; else recorded MISSING.",
       "required_by": [
         "model_4",
         "model_5"
@@ -248,8 +247,8 @@
       "feature_name": "sector_return_20d",
       "group": "market_sector_performance",
       "description": "Sector ETF 20d return",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Market-context product exists; needs PIT sector/benchmark read.",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider when benchmark/sector Silver bars exist; else recorded MISSING.",
       "required_by": [
         "model_4",
         "model_5"
@@ -259,8 +258,8 @@
       "feature_name": "momentum_20d",
       "group": "momentum",
       "description": "20-day price momentum",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Derivable from PIT OHLCV.",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider (returns computed from PIT bars).",
       "required_by": [
         "model_1",
         "model_2",
@@ -272,8 +271,8 @@
       "feature_name": "momentum_60d",
       "group": "momentum",
       "description": "60-day price momentum",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Derivable from PIT OHLCV.",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider (returns computed from PIT bars).",
       "required_by": [
         "model_1",
         "model_2",
@@ -285,8 +284,8 @@
       "feature_name": "relative_strength_60d",
       "group": "relative_strength",
       "description": "RS vs benchmark 60d",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "From market-context product (PIT).",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider (market-context relative strength on PIT bars).",
       "required_by": [
         "model_4",
         "model_5"
@@ -296,8 +295,8 @@
       "feature_name": "macd",
       "group": "rsi_macd",
       "description": "MACD line",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "RSI/MACD derivable from PIT OHLCV.",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider (RSI/MACD from PIT bars).",
       "required_by": [
         "model_1",
         "model_3",
@@ -308,8 +307,8 @@
       "feature_name": "macd_hist",
       "group": "rsi_macd",
       "description": "MACD histogram",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "RSI/MACD derivable from PIT OHLCV.",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider (RSI/MACD from PIT bars).",
       "required_by": [
         "model_1",
         "model_3",
@@ -320,8 +319,8 @@
       "feature_name": "macd_signal",
       "group": "rsi_macd",
       "description": "MACD signal line",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "RSI/MACD derivable from PIT OHLCV.",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider (RSI/MACD from PIT bars).",
       "required_by": [
         "model_1",
         "model_3",
@@ -332,8 +331,8 @@
       "feature_name": "rsi_14",
       "group": "rsi_macd",
       "description": "14-day RSI",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "RSI/MACD derivable from PIT OHLCV.",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider (RSI/MACD from PIT bars).",
       "required_by": [
         "model_1",
         "model_3",
@@ -344,8 +343,8 @@
       "feature_name": "rule_based_momentum_factor",
       "group": "rule_based_opportunity_score",
       "description": "Rule-based momentum factor",
-      "source_status": "unavailable",
-      "source_note": "Consumes the rule-based Opportunity Score contract from PR #10 once published.",
+      "source_status": "wired",
+      "source_note": "Wired: catalystiq.ml.features.pit_provider.SilverPointInTimeProvider consumes the published build_opportunity_score contract (score + factor sub-scores).",
       "required_by": [
         "model_4"
       ]
@@ -354,8 +353,8 @@
       "feature_name": "rule_based_setup_strength",
       "group": "rule_based_opportunity_score",
       "description": "Rule-based opportunity score",
-      "source_status": "unavailable",
-      "source_note": "Consumes the rule-based Opportunity Score contract from PR #10 once published.",
+      "source_status": "wired",
+      "source_note": "Wired: catalystiq.ml.features.pit_provider.SilverPointInTimeProvider consumes the published build_opportunity_score contract (score + factor sub-scores).",
       "required_by": [
         "model_4"
       ]
@@ -364,8 +363,8 @@
       "feature_name": "rule_based_trend_factor",
       "group": "rule_based_opportunity_score",
       "description": "Rule-based trend factor",
-      "source_status": "unavailable",
-      "source_note": "Consumes the rule-based Opportunity Score contract from PR #10 once published.",
+      "source_status": "wired",
+      "source_note": "Wired: catalystiq.ml.features.pit_provider.SilverPointInTimeProvider consumes the published build_opportunity_score contract (score + factor sub-scores).",
       "required_by": [
         "model_4"
       ]
@@ -374,8 +373,8 @@
       "feature_name": "rule_based_volume_factor",
       "group": "rule_based_opportunity_score",
       "description": "Rule-based volume factor",
-      "source_status": "unavailable",
-      "source_note": "Consumes the rule-based Opportunity Score contract from PR #10 once published.",
+      "source_status": "wired",
+      "source_note": "Wired: catalystiq.ml.features.pit_provider.SilverPointInTimeProvider consumes the published build_opportunity_score contract (score + factor sub-scores).",
       "required_by": [
         "model_4"
       ]
@@ -385,7 +384,7 @@
       "group": "sec_fundamentals",
       "description": "PIT gross margin",
       "source_status": "integration_exists_not_point_in_time",
-      "source_note": "SEC EDGAR filings ingested; needs original+amended PIT fundamentals read.",
+      "source_note": "SEC EDGAR filings ingested; original+amended PIT fundamentals read not yet mapped (recorded MISSING).",
       "required_by": [
         "model_1",
         "model_4"
@@ -396,7 +395,7 @@
       "group": "sec_fundamentals",
       "description": "PIT revenue YoY growth",
       "source_status": "integration_exists_not_point_in_time",
-      "source_note": "SEC EDGAR filings ingested; needs original+amended PIT fundamentals read.",
+      "source_note": "SEC EDGAR filings ingested; original+amended PIT fundamentals read not yet mapped (recorded MISSING).",
       "required_by": [
         "model_1",
         "model_4"
@@ -407,7 +406,7 @@
       "group": "sec_fundamentals",
       "description": "Recent 8-K/10-Q event flag",
       "source_status": "integration_exists_not_point_in_time",
-      "source_note": "SEC EDGAR filings ingested; needs original+amended PIT fundamentals read.",
+      "source_note": "SEC EDGAR filings ingested; original+amended PIT fundamentals read not yet mapped (recorded MISSING).",
       "required_by": [
         "model_1",
         "model_4"
@@ -418,7 +417,7 @@
       "group": "support_resistance",
       "description": "Distance to resistance",
       "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Market-structure product computes levels; needs PIT read.",
+      "source_note": "Market-structure product computes levels; distance-to-level not yet mapped into the PIT provider (recorded MISSING).",
       "required_by": [
         "model_1",
         "model_5"
@@ -429,7 +428,7 @@
       "group": "support_resistance",
       "description": "Distance to support",
       "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Market-structure product computes levels; needs PIT read.",
+      "source_note": "Market-structure product computes levels; distance-to-level not yet mapped into the PIT provider (recorded MISSING).",
       "required_by": [
         "model_1",
         "model_5"
@@ -439,8 +438,8 @@
       "feature_name": "price_vs_sma_50",
       "group": "trend_moving_average",
       "description": "Close / SMA50 - 1",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Derivable from PIT OHLCV via the analysis engine.",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider (technical snapshot on PIT bars).",
       "required_by": [
         "model_1",
         "model_2",
@@ -453,8 +452,8 @@
       "feature_name": "sma_20",
       "group": "trend_moving_average",
       "description": "20-day SMA",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Derivable from PIT OHLCV via the analysis engine.",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider (technical snapshot on PIT bars).",
       "required_by": [
         "model_1",
         "model_2",
@@ -467,8 +466,8 @@
       "feature_name": "sma_200",
       "group": "trend_moving_average",
       "description": "200-day SMA",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Derivable from PIT OHLCV via the analysis engine.",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider (technical snapshot on PIT bars).",
       "required_by": [
         "model_1",
         "model_2",
@@ -481,8 +480,8 @@
       "feature_name": "sma_50",
       "group": "trend_moving_average",
       "description": "50-day SMA",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Derivable from PIT OHLCV via the analysis engine.",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider (technical snapshot on PIT bars).",
       "required_by": [
         "model_1",
         "model_2",
@@ -495,8 +494,8 @@
       "feature_name": "sma_50_slope",
       "group": "trend_moving_average",
       "description": "SMA50 slope",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Derivable from PIT OHLCV via the analysis engine.",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider (technical snapshot on PIT bars).",
       "required_by": [
         "model_1",
         "model_2",
@@ -509,8 +508,8 @@
       "feature_name": "atr_14",
       "group": "volatility_atr",
       "description": "14-day ATR",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "ATR/realized vol derivable from PIT OHLCV.",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider (ATR/realized vol from PIT bars).",
       "required_by": [
         "model_1",
         "model_2",
@@ -522,8 +521,8 @@
       "feature_name": "realized_vol_20d",
       "group": "volatility_atr",
       "description": "20-day realized vol",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "ATR/realized vol derivable from PIT OHLCV.",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider (ATR/realized vol from PIT bars).",
       "required_by": [
         "model_1",
         "model_2",
@@ -535,8 +534,8 @@
       "feature_name": "dollar_volume_20d",
       "group": "volume_relative_volume",
       "description": "20-day avg dollar volume",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Derivable from PIT OHLCV.",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider (relative volume from PIT bars).",
       "required_by": [
         "model_1",
         "model_4",
@@ -547,8 +546,8 @@
       "feature_name": "relative_volume_20d",
       "group": "volume_relative_volume",
       "description": "Volume / 20-day avg",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "Derivable from PIT OHLCV.",
+      "source_status": "wired",
+      "source_note": "Wired via catalystiq.ml.features.pit_provider.SilverPointInTimeProvider (relative volume from PIT bars).",
       "required_by": [
         "model_1",
         "model_4",
