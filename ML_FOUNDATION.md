@@ -214,6 +214,21 @@ findings, per-feature-group coverage, label class balance / return variance, and
 a structured `sufficiency` block with human-readable notes (including the
 expected always-missing groups: earnings, macro).
 
+An operator CLI wraps it for real-data runs (in an environment with market-data
+access):
+
+```
+python -m catalystiq.ml.dry_run_cli \
+    --symbols AAPL,MSFT,NVDA,JPM,XOM --benchmark SPY \
+    --start 2020-01-01 --end 2021-06-30 --horizon 5 --enable --ingest
+```
+
+`--enable` turns on `ENABLE_ML`+`ENABLE_ML_TRAINING` for that process only (no
+persisted config change, no inference/serving/approval); `--ingest` refreshes
+each symbol's Silver via the app's own pipeline first, reporting (never faking)
+any per-symbol fetch failure. It prints the `DryRunReport` JSON and exits
+non-zero when the data is not yet sufficient for training.
+
 ## What remains before any model can be approved
 
 1. **Real point-in-time data wiring** — *price-derived + rule-based groups are
