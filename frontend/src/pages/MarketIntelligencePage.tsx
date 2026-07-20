@@ -130,15 +130,13 @@ export default function MarketIntelligencePage({
         onClick={() => onViewAnalysis(topName)}
         secondary={{ label: `Trade ${topName}`, onClick: () => onTrade(topName) }}
       />
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-ink-primary">Market Analysis</h1>
-          <p className="mt-1 text-sm text-ink-secondary">
-            Market Overview, sector ranking, and the rule-based watchlist are live. The catalysts
-            and behavioral sections remain illustrative demo data (no validated source yet).
-          </p>
-        </div>
-        <DemoBadge />
+      <div>
+        <h1 className="text-xl font-semibold text-ink-primary">Market Analysis</h1>
+        <p className="mt-1 text-sm text-ink-secondary">
+          Market Overview, sector ranking, and the rule-based watchlist are live. Only the
+          sections marked <span className="font-medium text-status-warning">Demo data</span> below
+          remain illustrative (no validated source yet).
+        </p>
       </div>
 
       <SectionCard title="Market Overview" description="Live index, rate, and commodity levels">
@@ -228,7 +226,7 @@ export default function MarketIntelligencePage({
         </div>
       </SectionCard>
 
-      <SectionCard title="Economic and Political Catalysts">
+      <SectionCard title="Economic and Political Catalysts" action={<DemoBadge />}>
         <ul className="space-y-3">
           {catalysts.map((c) => (
             <li key={c.headline} className="rounded-lg border border-border px-3 py-2.5">
