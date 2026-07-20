@@ -35,16 +35,57 @@ def test_missing_credentials_raise_broker_error():
         WebullBroker("key", "secret", "")
 
 
-def test_get_account_raises_pointing_at_raw_method():
-    broker = make_broker()
-    with pytest.raises(BrokerError, match="get_account_balance_raw"):
-        broker.get_account()
+def test_get_account_maps_balance_response():
+    trade_client = MagicMock()
+    trade_client.account_v2.get_account_balance.return_value = fake_response(
+        json_body={
+            "total_asset_currency": "USD",
+            "total_net_liquidation_value": "1000.00",
+            "total_cash_balance": "800.00",
+            "total_day_profit_loss": "5.00",
+            "open_margin_calls": [],
+            "account_currency_assets": [
+                {"currency": "USD", "day_buying_power": "3200.00", "cash_balance": "800.00"}
+            ],
+        }
+    )
+    broker = make_broker(trade_client)
+
+    acct = broker.get_account()
+
+    assert acct.currency == "USD"
+    assert acct.cash == "800.00"
+    assert acct.portfolio_value == "1000.00"
+    assert acct.buying_power == "3200.00"
+    assert float(acct.last_equity) == 995.0  # 1000 - 5
+    trade_client.account_v2.get_account_balance.assert_called_once_with("test-account")
 
 
-def test_get_positions_raises_pointing_at_raw_method():
-    broker = make_broker()
-    with pytest.raises(BrokerError, match="get_positions_raw"):
-        broker.get_positions()
+def test_get_positions_maps_list_response():
+    trade_client = MagicMock()
+    trade_client.account_v2.get_account_position.return_value = fake_response(
+        json_body=[
+            {
+                "symbol": "VOO",
+                "quantity": "1",
+                "cost_price": "684.65",
+                "cost": "684.65",
+                "market_value": "682.91",
+                "last_price": "682.91",
+                "unrealized_profit_loss": "-1.74",
+                "unrealized_profit_loss_rate": "-0.0025",
+                "day_profit_loss": "-1.74",
+            }
+        ]
+    )
+    broker = make_broker(trade_client)
+
+    positions = broker.get_positions()
+
+    assert len(positions) == 1
+    assert positions[0].symbol == "VOO"
+    assert positions[0].side == "long"
+    assert positions[0].current_price == "682.91"
 
 
 def test_get_account_balance_raw_returns_json_on_success():
