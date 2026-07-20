@@ -244,15 +244,11 @@ class WebullBroker(BrokerProvider):
     (`/openapi/trade/order/...`). Order field names and the OrderType/OrderTIF
     enums below are taken directly from that SDK source, not guessed.
 
-    NOT verified: the JSON response *shape* for account balance
-    (`GET /openapi/assets/balance`) and positions (`account_v2.get_account_position`)
-    - the SDK ships no response models for these (`get_response()` returns
-    the raw HTTP response) and this build couldn't fetch Webull's Accounts
-    reference page to confirm field names. Rather than guess field names and
-    silently show wrong numbers, `get_account()`/`get_positions()` raise
-    `BrokerError` pointing at the raw passthrough methods instead. Wire up a
-    typed mapping once those field names are confirmed (e.g. against a live
-    sandbox call, or the Accounts reference page content).
+    Account balance (`GET /openapi/assets/balance`) and positions
+    (`account_v2.get_account_position`) are mapped by `_map_webull_account` /
+    `_map_webull_positions`, with field names verified against a live sandbox
+    account. The raw passthroughs (`get_account_balance_raw` /
+    `get_positions_raw`) remain for inspection.
 
     Also NOT supported here (raises `BrokerError` rather than silently
     mismapping): notional (dollar-amount) orders - Webull's order schema is
@@ -345,11 +341,7 @@ class WebullBroker(BrokerProvider):
         return response.json()
 
     def get_account(self) -> AccountInfo:
-        raise BrokerError(
-            "WebullBroker.get_account() has no verified field mapping for Webull's "
-            "balance response - see the class docstring. Use get_account_balance_raw() "
-            "for the unmapped JSON."
-        )
+        return _map_webull_account(self.get_account_balance_raw())
 
     def get_account_balance_raw(self) -> dict:
         """Unmapped passthrough of GET /openapi/assets/balance."""
@@ -357,14 +349,10 @@ class WebullBroker(BrokerProvider):
         return self._check_response(response)
 
     def get_positions(self) -> list[Position]:
-        raise BrokerError(
-            "WebullBroker.get_positions() has no verified field mapping for Webull's "
-            "positions response - see the class docstring. Use get_positions_raw() for "
-            "the unmapped JSON."
-        )
+        return _map_webull_positions(self.get_positions_raw())
 
-    def get_positions_raw(self) -> dict:
-        """Unmapped passthrough of account_v2.get_account_position."""
+    def get_positions_raw(self):
+        """Unmapped passthrough of account_v2.get_account_position (a JSON list)."""
         response = self._trade_client.account_v2.get_account_position(self._account_id)
         return self._check_response(response)
 
@@ -447,6 +435,97 @@ class WebullBroker(BrokerProvider):
         if order.stop_price is not None:
             webull_order["stop_price"] = str(order.stop_price)
         return webull_order
+
+
+def _to_float(value) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _num_str(value, default: str = "0") -> str:
+    """Webull returns numbers as strings; pass them through, defaulting a
+    missing/None value rather than emitting 'None'."""
+    return default if value is None else str(value)
+
+
+def _map_webull_account(data: dict) -> AccountInfo:
+    """Map Webull's /openapi/assets/balance response (verified against a live
+    sandbox account) to the provider-agnostic AccountInfo. Webull reports totals
+    at the top level and per-currency buying power under
+    `account_currency_assets`; it has no explicit status/blocked/PDT flags, so
+    those use safe defaults (an open margin call is the one restriction it does
+    report)."""
+    currency = str(data.get("total_asset_currency") or "USD")
+    assets = data.get("account_currency_assets") or []
+    asset = next(
+        (a for a in assets if str(a.get("currency")) == currency),
+        assets[0] if assets else {},
+    )
+
+    net_liq = data.get("total_net_liquidation_value")
+    day_pl = data.get("total_day_profit_loss")
+    # Yesterday's close equity = today's equity minus today's P/L (both real).
+    net_liq_f, day_pl_f = _to_float(net_liq), _to_float(day_pl)
+    if net_liq_f is not None and day_pl_f is not None:
+        last_equity = str(round(net_liq_f - day_pl_f, 2))
+    else:
+        last_equity = _num_str(net_liq)
+
+    margin_calls = data.get("open_margin_calls") or []
+
+    return AccountInfo(
+        status="ACTIVE",
+        currency=currency,
+        cash=_num_str(data.get("total_cash_balance") or asset.get("cash_balance")),
+        # Day-trading buying power (Webull's headline BP), falling back to
+        # overnight then cash if a plan doesn't report it.
+        buying_power=_num_str(
+            asset.get("day_buying_power")
+            or asset.get("overnight_buying_power")
+            or data.get("total_cash_balance")
+        ),
+        portfolio_value=_num_str(net_liq),
+        equity=_num_str(net_liq),
+        last_equity=last_equity,
+        trading_blocked=bool(margin_calls),
+        account_blocked=False,
+        pattern_day_trader=False,
+    )
+
+
+def _map_webull_positions(data) -> list[Position]:
+    """Map Webull's account-position response (a JSON list, verified against a
+    live sandbox account) to provider-agnostic Positions. Tolerates a
+    dict-wrapped list too. Side is derived from quantity sign."""
+    if isinstance(data, list):
+        rows = data
+    elif isinstance(data, dict):
+        rows = data.get("positions") or data.get("items") or []
+    else:
+        rows = []
+
+    out: list[Position] = []
+    for p in rows:
+        qty = p.get("quantity")
+        qty_f = _to_float(qty)
+        side = "short" if (qty_f is not None and qty_f < 0) else "long"
+        out.append(
+            Position(
+                symbol=str(p.get("symbol") or ""),
+                side=side,
+                qty=_num_str(qty),
+                avg_entry_price=_num_str(p.get("cost_price")),
+                market_value=_num_str(p.get("market_value")),
+                cost_basis=_num_str(p.get("cost")),
+                unrealized_pl=_num_str(p.get("unrealized_profit_loss")),
+                unrealized_plpc=_num_str(p.get("unrealized_profit_loss_rate")),
+                current_price=_num_str(p.get("last_price")),
+                change_today=_num_str(p.get("day_profit_loss")),
+            )
+        )
+    return out
 
 
 _SUPPORTED_BROKER_PROVIDERS = {"webull"}
