@@ -9,12 +9,11 @@ import { catalysts } from "../mockMarketData";
 import { marketWideBehavioralAnalysis } from "../mockBehavioralData";
 import {
   getOpportunityScanShared,
-  getQuotes,
   getSectors,
   type OpportunityScore,
-  type QuoteResult,
   type SectorPerformance,
 } from "../lib/api";
+import { useLiveQuotes } from "../lib/liveData";
 import type { PageId } from "../types/nav";
 
 // Live market-overview indices/rates -> Yahoo symbols. `pct` marks a rate
@@ -83,21 +82,10 @@ export default function MarketIntelligencePage({
   }, []);
   const topName = watchlist && watchlist.length ? watchlist[0].symbol : "SPY";
 
-  // Live market overview (real quotes; unavailable symbols show "Insufficient data").
-  const [overview, setOverview] = useState<QuoteResult[]>([]);
-  useEffect(() => {
-    let alive = true;
-    getQuotes(MARKET_OVERVIEW.map((m) => m.symbol))
-      .then((q) => {
-        if (alive) setOverview(q);
-      })
-      .catch(() => {
-        /* leave empty; render shows "Insufficient data", never fabricated */
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
+  // Live market overview (real quotes; unavailable symbols show "Insufficient
+  // data"). Shared 15s live cache — visibility-aware, deduped across pages.
+  const overviewQuery = useLiveQuotes(MARKET_OVERVIEW.map((m) => m.symbol));
+  const overview = overviewQuery.data ?? [];
   const overviewBySymbol = new Map(overview.map((q) => [q.symbol.toUpperCase(), q]));
 
   // Live sector performance (deterministic, from real ETF history).

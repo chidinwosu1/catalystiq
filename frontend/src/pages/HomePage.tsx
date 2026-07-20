@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Activity,
   ArrowRight,
@@ -22,7 +22,8 @@ import {
   Users,
 } from "lucide-react";
 import SignalNetwork from "../components/home/SignalNetwork";
-import { getQuotes, type QuoteResult } from "../lib/api";
+import { type QuoteResult } from "../lib/api";
+import { useLiveQuotes } from "../lib/liveData";
 import type { PageId } from "../types/nav";
 
 interface HomePageProps {
@@ -234,23 +235,16 @@ const secTitle =
 export default function HomePage({ onNavigate }: HomePageProps) {
   const rootRef = useRevealOnScroll();
 
-  // Live market ticker (real quotes; "—" for anything unavailable).
-  const [tickerRows, setTickerRows] = useState<TickerRow[]>(
-    TICKER_SYMBOLS.map((t) => ({ label: t.label, value: "—", change: null, dir: "flat" }))
+  // Live market ticker (real quotes; "—" for anything unavailable). Shared 15s
+  // live cache — reused by any other view showing these same symbols.
+  const tickerQuotes = useLiveQuotes(TICKER_SYMBOLS.map((t) => t.symbol));
+  const tickerRows = useMemo<TickerRow[]>(
+    () =>
+      tickerQuotes.data
+        ? buildTickerRows(tickerQuotes.data)
+        : TICKER_SYMBOLS.map((t) => ({ label: t.label, value: "—", change: null, dir: "flat" })),
+    [tickerQuotes.data]
   );
-  useEffect(() => {
-    let alive = true;
-    getQuotes(TICKER_SYMBOLS.map((t) => t.symbol))
-      .then((quotes) => {
-        if (alive) setTickerRows(buildTickerRows(quotes));
-      })
-      .catch(() => {
-        /* leave the placeholder dashes; never fabricate values */
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   const quickActions: { title: string; detail: string; icon: typeof LineChart; page: PageId }[] = [
     { title: "Start New Analysis", detail: "Research any ticker in depth.", icon: LineChart, page: "analysis" },

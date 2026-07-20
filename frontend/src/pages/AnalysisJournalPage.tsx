@@ -2,12 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Loader2, Plus } from "lucide-react";
 import {
   ApiError,
-  getQuote,
   getTechnicalSnapshot,
   type IndicatorReading,
-  type Quote,
   type TechnicalSnapshot,
 } from "../lib/api";
+import { useLiveQuote } from "../lib/liveData";
 import SectionCard from "../components/SectionCard";
 import StatTile from "../components/StatTile";
 import StrategyOverview from "../components/StrategyOverview";
@@ -115,9 +114,16 @@ export default function AnalysisJournalPage({
   onNavigate,
 }: AnalysisJournalPageProps) {
   const [symbol, setSymbol] = useState((initialSymbol || "AAPL").toUpperCase());
-  const [quote, setQuote] = useState<Quote | null>(null);
-  const [quoteLoading, setQuoteLoading] = useState(false);
-  const [quoteError, setQuoteError] = useState<ApiError | null>(null);
+
+  // Live quote for the researched symbol via the shared 15s cache. The heavier
+  // technical snapshot below keeps its own (slower) load, unchanged.
+  const quoteQuery = useLiveQuote(symbol);
+  const quote = quoteQuery.data ?? null;
+  const quoteLoading = quoteQuery.status === "loading";
+  // Only surface an error when there's no quote to show (a stale refresh keeps
+  // the last price on screen instead of flashing an error).
+  const quoteError =
+    quoteQuery.status === "error" ? (quoteQuery.error as ApiError | undefined) ?? null : null;
 
   const [technical, setTechnical] = useState<TechnicalSnapshot | null>(null);
   const [technicalLoading, setTechnicalLoading] = useState(false);
@@ -132,24 +138,6 @@ export default function AnalysisJournalPage({
       setSymbol(initialSymbol.toUpperCase());
     }
   }, [initialSymbol]);
-
-  useEffect(() => {
-    if (!symbol) return;
-    let cancelled = false;
-    setQuoteLoading(true);
-    setQuoteError(null);
-    getQuote(symbol)
-      .then((q) => !cancelled && setQuote(q))
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setQuote(null);
-        setQuoteError(err instanceof ApiError ? err : new ApiError(0, "Unexpected error."));
-      })
-      .finally(() => !cancelled && setQuoteLoading(false));
-    return () => {
-      cancelled = true;
-    };
-  }, [symbol]);
 
   useEffect(() => {
     if (!symbol) return;

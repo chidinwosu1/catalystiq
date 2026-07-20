@@ -1,14 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, BookOpen, Loader2, RefreshCw } from "lucide-react";
 import {
-  ApiError,
-  getAccount,
   getFundamentals,
-  getPositions,
-  type AccountInfo,
+  type ApiError,
   type FundamentalsSnapshot,
-  type Position,
 } from "../lib/api";
+import { useLiveAccount, useLivePositions } from "../lib/liveData";
 import {
   accountDayPnL,
   investedAmount,
@@ -28,17 +25,11 @@ interface PortfolioPageProps {
   onNavigate: (page: PageId) => void;
 }
 
-// Refresh the live account balance + positions every 15s while the page and
-// browser tab are visible. Polling pauses when the tab is hidden and backs off
-// exponentially (capped) when the broker rate-limits us with a 429.
-const POLL_MS = 15_000;
-const MAX_BACKOFF_STEPS = 3; // 15s -> 30s -> 60s -> 120s cap
-
 // Sector fundamentals barely change intraday, so they are cached per symbol for
-// the life of the page ("cache the account list") — the 15s poll re-fetches the
-// balance and positions, but reuses this cache instead of re-hitting the
-// fundamentals endpoint for symbols we've already resolved. Only successful
-// lookups are cached, so a transient failure retries on the next symbol change.
+// the life of the page — the shared 15s live poll re-fetches the balance and
+// positions, but reuses this cache instead of re-hitting the fundamentals
+// endpoint for symbols we've already resolved. Only successful lookups are
+// cached, so a transient failure retries on the next symbol change.
 const _fundamentalsCache = new Map<string, FundamentalsSnapshot>();
 
 async function getFundamentalsCached(symbol: string): Promise<FundamentalsSnapshot> {
@@ -57,101 +48,12 @@ function pct(n: number): string {
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
 }
 
-function formatTime(d: Date): string {
-  return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
-
-/**
- * Live account + positions with visible-tab polling.
- *
- * Guarantees:
- *  - refreshes every 15s only while `document.visibilityState === "visible"`;
- *  - pauses when the tab is hidden and refreshes immediately on return;
- *  - backs off (2^n, capped) after a 429 and resets on the next success;
- *  - never clears the last good values — a failed refresh keeps them on screen
- *    and only surfaces `error`.
- */
-function usePortfolioData() {
-  const [account, setAccount] = useState<AccountInfo | null>(null);
-  const [positions, setPositions] = useState<Position[]>([]);
-  const [loading, setLoading] = useState(true); // true only until the first result
-  const [refreshing, setRefreshing] = useState(false); // a background/manual refresh is in flight
-  const [error, setError] = useState<ApiError | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-
-  const inFlight = useRef(false);
-  const backoff = useRef(0); // consecutive 429s
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  // Latest fetch fn, so the scheduler/visibility listener never call a stale closure.
-  const fetchRef = useRef<(manual?: boolean) => void>(() => {});
-
-  const clearTimer = useCallback(() => {
-    if (timer.current) {
-      clearTimeout(timer.current);
-      timer.current = undefined;
-    }
-  }, []);
-
-  const scheduleNext = useCallback(() => {
-    clearTimer();
-    if (document.visibilityState !== "visible") return; // stay paused while hidden
-    const delay = POLL_MS * 2 ** Math.min(backoff.current, MAX_BACKOFF_STEPS);
-    timer.current = setTimeout(() => fetchRef.current(), delay);
-  }, [clearTimer]);
-
-  const runFetch = useCallback(
-    async (manual = false) => {
-      // Don't poll a hidden tab; a manual click still refreshes.
-      if (!manual && document.visibilityState !== "visible") return;
-      if (inFlight.current) return; // never overlap requests
-      inFlight.current = true;
-      setRefreshing(true);
-      try {
-        const [a, p] = await Promise.all([getAccount(), getPositions()]);
-        setAccount(a);
-        setPositions(p);
-        setLastUpdated(new Date());
-        setError(null);
-        backoff.current = 0; // recovered — resume the fast cadence
-      } catch (err) {
-        // Keep the last successful account/positions on screen; just report it.
-        setError(err instanceof ApiError ? err : new ApiError(0, "Unexpected error."));
-        if (err instanceof ApiError && err.status === 429) {
-          backoff.current = Math.min(backoff.current + 1, MAX_BACKOFF_STEPS);
-        }
-      } finally {
-        inFlight.current = false;
-        setRefreshing(false);
-        setLoading(false);
-        scheduleNext();
-      }
-    },
-    [scheduleNext]
-  );
-
-  useEffect(() => {
-    fetchRef.current = runFetch;
-  }, [runFetch]);
-
-  useEffect(() => {
-    fetchRef.current(); // initial load
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") {
-        fetchRef.current(); // catch up immediately, then resume the interval
-      } else {
-        clearTimer(); // pause while hidden
-      }
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibility);
-      clearTimer();
-    };
-  }, [clearTimer]);
-
-  const refresh = useCallback(() => fetchRef.current(true), []);
-
-  return { account, positions, loading, refreshing, error, lastUpdated, refresh };
+function formatTime(ms: number): string {
+  return new Date(ms).toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 }
 
 export default function PortfolioPage({
@@ -159,8 +61,32 @@ export default function PortfolioPage({
   onViewAnalysis,
   onNavigate,
 }: PortfolioPageProps) {
-  const { account, positions, loading, refreshing, error, lastUpdated, refresh } =
-    usePortfolioData();
+  // Live account + positions come from the shared 15s cache: visibility-aware,
+  // deduped, backing off on 429s, and reused by any other page that needs them.
+  const accountQuery = useLiveAccount();
+  const positionsQuery = useLivePositions();
+
+  const account = accountQuery.data ?? null;
+  const positions = useMemo(() => positionsQuery.data ?? [], [positionsQuery.data]);
+
+  // "Loading" only for the very first paint (no data yet); background refreshes
+  // never blank the screen.
+  const loading =
+    (accountQuery.status === "loading" && !account) ||
+    (positionsQuery.status === "loading" && !positionsQuery.data);
+  const refreshing = accountQuery.isFetching || positionsQuery.isFetching;
+  const lastUpdatedMs = Math.max(accountQuery.lastUpdated ?? 0, positionsQuery.lastUpdated ?? 0);
+
+  // A failure while we already have data is non-blocking (keep the last values);
+  // a first-load failure with nothing to show is blocking.
+  const failure = (accountQuery.error ?? positionsQuery.error) as ApiError | undefined;
+  const blockingError = failure && !account ? failure : null;
+  const staleError = (accountQuery.isStale || positionsQuery.isStale) && account ? failure : null;
+
+  const refresh = () => {
+    accountQuery.refetch();
+    positionsQuery.refetch();
+  };
 
   // Real sector exposure from holdings: sector comes from provider fundamentals
   // (cached per symbol), weighted by each position's current market value. The
@@ -233,10 +159,6 @@ export default function PortfolioPage({
     return { winner: sorted[0], loser: sorted[sorted.length - 1] };
   }, [positions]);
 
-  // Initial failure (no data yet) is blocking; a failure while we already have
-  // data is non-blocking — we keep showing the last good values.
-  const staleError = error && account;
-
   return (
     <div className="space-y-6">
       <WorkflowBar current={4} onNavigate={onNavigate} />
@@ -266,9 +188,9 @@ export default function PortfolioPage({
             <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
             Refresh
           </button>
-          {lastUpdated && (
+          {lastUpdatedMs > 0 && (
             <span className="text-xs tabular-nums text-ink-muted">
-              Updated {formatTime(lastUpdated)}
+              Updated {formatTime(lastUpdatedMs)}
             </span>
           )}
         </div>
@@ -281,10 +203,10 @@ export default function PortfolioPage({
       )}
 
       {/* Blocking error: initial load failed and there's nothing to show. */}
-      {error && !account && (
+      {blockingError && (
         <div className="flex items-start gap-2 rounded-lg border border-status-critical/40 bg-status-critical-soft px-3 py-2.5 text-sm text-status-critical">
           <AlertTriangle size={15} className="mt-0.5 shrink-0" />
-          <span>{error.message}</span>
+          <span>{blockingError.message}</span>
         </div>
       )}
 
@@ -293,7 +215,7 @@ export default function PortfolioPage({
         <div className="flex items-start gap-2 rounded-lg border border-status-warning/40 bg-status-warning-soft px-3 py-2.5 text-sm text-status-warning">
           <AlertTriangle size={15} className="mt-0.5 shrink-0" />
           <span>
-            {error.status === 429
+            {staleError.status === 429
               ? "Broker is rate-limiting refreshes — showing the last values and slowing down."
               : "Couldn't refresh just now — showing the last successful values."}
           </span>
