@@ -476,3 +476,81 @@ def get_broker_provider() -> BrokerProvider:
         api_endpoint=settings.webull_api_base_url,
         token_dir=settings.webull_token_dir,
     )
+
+
+def _sdk_version() -> str:
+    try:
+        import webull
+
+        return getattr(webull, "__version__", "unknown")
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
+def _mask(value: str | None) -> dict:
+    """Secret-masked view of a credential: whether it's set, its length, and a
+    short preview - never the raw value. Length exposes accidental
+    truncation/whitespace; the preview helps confirm the right value is set."""
+    v = (value or "").strip()
+    if not v:
+        return {"set": False, "length": 0, "preview": ""}
+    preview = v if len(v) <= 8 else f"{v[:4]}…{v[-4:]}"
+    return {"set": True, "length": len(v), "preview": preview}
+
+
+def webull_diagnostics() -> dict:
+    """Read-only, secret-masked snapshot of the Webull configuration for
+    debugging auth/signature failures: the host the SDK actually resolves to,
+    the (masked) credentials in use, and the real initialization error. Never
+    returns raw secrets and never places an order."""
+    from catalystiq.config import get_settings
+
+    settings = get_settings()
+    region = (settings.webull_region_id or "us").strip() or "us"
+    base_url = (settings.webull_api_base_url or "").strip()
+
+    out: dict = {
+        "broker_provider": settings.broker_provider,
+        "region_id": region,
+        "api_base_url_setting": base_url,
+        "app_key": _mask(settings.webull_app_key),
+        # Never preview a secret - length only (catches whitespace/truncation).
+        "app_secret": {
+            "set": bool((settings.webull_app_secret or "").strip()),
+            "length": len((settings.webull_app_secret or "").strip()),
+        },
+        "account_id": _mask(settings.webull_account_id),
+        "sdk_version": _sdk_version(),
+        "resolved_trade_host": None,
+        "signer": "HMAC-SHA256 (app_secret) - RSA not used",
+        "init_ok": False,
+        "init_error": None,
+    }
+
+    # Resolve the host the trade calls will hit - WITHOUT a network call - so we
+    # can confirm the sandbox override actually took effect.
+    try:
+        from webull.core.client import ApiClient
+        from webull.core.common import api_type as _api_type
+        from webull.core.endpoint.resolver_endpoint_request import ResolveEndpointRequest
+
+        api_client = ApiClient(
+            (settings.webull_app_key or "").strip(),
+            (settings.webull_app_secret or "").strip(),
+            region,
+        )
+        if base_url:
+            api_client.add_endpoint(region, base_url)
+        request = ResolveEndpointRequest(region, _api_type.DEFAULT)
+        out["resolved_trade_host"] = api_client._endpoint_resolver.resolve(request)
+    except Exception as exc:  # noqa: BLE001 - diagnostic, report the reason
+        out["resolve_error"] = f"{type(exc).__name__}: {exc}"
+
+    # Attempt a full init (this DOES network) to capture the real error text.
+    try:
+        get_broker_provider()
+        out["init_ok"] = True
+    except Exception as exc:  # noqa: BLE001 - diagnostic surfaces the message
+        out["init_error"] = str(exc)
+
+    return out

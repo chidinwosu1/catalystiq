@@ -108,6 +108,17 @@ def get_paper_orders(broker: BrokerProvider = Depends(get_broker_provider)):
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@router.get("/webull-diagnostics")
+def webull_diagnostics_endpoint():
+    """Secret-masked view of the Webull config for debugging auth/signature
+    failures: the resolved host, masked credentials (lengths/preview only), and
+    the real init error. Read-only; never returns raw secrets or places an
+    order. Auth-gated by the router dependency."""
+    from catalystiq.providers.broker import webull_diagnostics
+
+    return webull_diagnostics()
+
+
 @router.get("/connection-test")
 def broker_connection_test():
     """Read-only Webull reachability check (§13). Never places/cancels an
