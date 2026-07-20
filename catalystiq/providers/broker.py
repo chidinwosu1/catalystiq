@@ -302,7 +302,10 @@ class WebullBroker(BrokerProvider):
         app_secret = (app_secret or "").strip()
         account_id = (account_id or "").strip()
         region_id = (region_id or "us").strip() or "us"
-        api_endpoint = (api_endpoint or "").strip()
+        # add_endpoint expects a BARE host (no scheme, no path). A pasted
+        # "https://api.sandbox.webull.com" is signed as the host, which mismatches
+        # what Webull signs (bare host) and yields "x-signature is invalid".
+        api_endpoint = _normalize_webull_host(api_endpoint)
         token_dir = (token_dir or "").strip()
 
         if not app_key or not app_secret or not account_id:
@@ -478,6 +481,19 @@ def get_broker_provider() -> BrokerProvider:
     )
 
 
+def _normalize_webull_host(value: str | None) -> str:
+    """Reduce a configured base URL to the bare host the Webull SDK's
+    add_endpoint expects: no scheme, no path, no trailing dots/slashes.
+    "https://api.sandbox.webull.com/" -> "api.sandbox.webull.com". Empty in,
+    empty out (the SDK then uses its default host)."""
+    v = (value or "").strip()
+    if not v:
+        return ""
+    v = v.split("://", 1)[-1]  # drop scheme (https:// / http://)
+    v = v.split("/", 1)[0]  # drop any path
+    return v.strip().strip(".")
+
+
 def _sdk_version() -> str:
     try:
         import webull
@@ -507,12 +523,14 @@ def webull_diagnostics() -> dict:
 
     settings = get_settings()
     region = (settings.webull_region_id or "us").strip() or "us"
-    base_url = (settings.webull_api_base_url or "").strip()
+    raw_base_url = (settings.webull_api_base_url or "").strip()
+    base_url = _normalize_webull_host(raw_base_url)
 
     out: dict = {
         "broker_provider": settings.broker_provider,
         "region_id": region,
-        "api_base_url_setting": base_url,
+        "api_base_url_setting": raw_base_url,
+        "api_base_url_normalized": base_url,
         "app_key": _mask(settings.webull_app_key),
         # Never preview a secret - length only (catches whitespace/truncation).
         "app_secret": {
