@@ -42,6 +42,12 @@ from catalystiq.ml.labels.barriers import Bar
 # features pass the licensing gate. Underlying inputs are validated Silver.
 _PROVIDER = "computed"
 
+# Max calendar-day gap between the prediction's last closed session and the
+# next stored bar for that bar to count as "the next session". Covers long
+# weekends + holidays; a larger gap means the next bar is a disconnected future
+# bar (or a halt/delisting), so entry there is refused (fail closed).
+MAX_ENTRY_GAP_DAYS = 7
+
 
 def _reading(readings, name):
     for r in readings:
@@ -276,17 +282,35 @@ class SilverPointInTimeProvider:
         return features
 
     def get_executable_entry(self, symbol: str, prediction_timestamp: dt.datetime):
-        """Next session's executable open AFTER the prediction timestamp.
+        """The IMMEDIATELY-following session's executable open after the
+        prediction timestamp - or ``None`` (fail closed).
 
-        Offline (historical) this reads the next stored Silver bar; at true
-        live inference that bar does not exist yet, so this returns None -
-        entry is never assumed at a price already known at prediction time.
+        Fails closed - never returning a disconnected future bar as the entry -
+        when any of these holds:
+          * no point-in-time history exists at/before the prediction date
+            (the requested date precedes the ingested Silver history), or
+          * there is no session after the prediction date (true live
+            inference: the next open is not yet knowable), or
+          * the next available bar is not contiguous - a gap larger than
+            ``MAX_ENTRY_GAP_DAYS`` calendar days means the bar is a distant
+            future bar (or the symbol was halted/delisted), not the next
+            session, and entering there would leak future information.
         """
         last_closed = self.freshness_policy.latest_expected_session(prediction_timestamp)
-        for b in self._all_bars(symbol):
-            if last_closed is None or b.date > last_closed:
+        if last_closed is None:
+            return None
+        bars = self._all_bars(symbol)
+        # Point-in-time history MUST exist at/before the prediction date, else
+        # there is nothing to base a prediction on and the "next" bar would be
+        # a future bar disconnected from any as-of state.
+        if not any(b.date <= last_closed for b in bars):
+            return None
+        for b in bars:
+            if b.date > last_closed:
                 if b.open is None:
                     return None
+                if (b.date - last_closed).days > MAX_ENTRY_GAP_DAYS:
+                    return None  # not the next session -> disconnected future bar
                 entry_session = dt.datetime.combine(b.date, dt.time(), tzinfo=prediction_timestamp.tzinfo)
                 return (entry_session, float(b.open))
         return None
