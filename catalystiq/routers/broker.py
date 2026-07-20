@@ -108,6 +108,31 @@ def get_paper_orders(broker: BrokerProvider = Depends(get_broker_provider)):
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@router.get("/webull-raw")
+def webull_raw_inspect(broker: BrokerProvider = Depends(get_broker_provider)):
+    """Read-only dump of Webull's RAW (unmapped) account-balance, positions, and
+    orders JSON, so their field shapes can be verified before wiring
+    get_account()/get_positions(). Each call is isolated (one failing doesn't
+    hide the others). Never places or cancels an order. Auth-gated by the router
+    dependency. Returns the caller's own account data (behind auth), no secrets."""
+    out: dict = {}
+    probes = {
+        "account_balance": "get_account_balance_raw",
+        "positions": "get_positions_raw",
+        "orders": "get_orders",
+    }
+    for label, method_name in probes.items():
+        method = getattr(broker, method_name, None)
+        if method is None:
+            out[label] = {"error": f"{method_name}() not available on this broker"}
+            continue
+        try:
+            out[label] = method()
+        except Exception as exc:  # noqa: BLE001 - diagnostic surfaces the reason
+            out[label] = {"error": f"{type(exc).__name__}: {exc}"}
+    return out
+
+
 @router.get("/webull-diagnostics")
 def webull_diagnostics_endpoint():
     """Secret-masked view of the Webull config for debugging auth/signature
