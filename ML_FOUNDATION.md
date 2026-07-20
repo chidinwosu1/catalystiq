@@ -195,6 +195,40 @@ states. `GET /ml/status`, `/ml/feature-requirements`, and `/ml/registry`
 expose non-sensitive metadata. No endpoint ever returns placeholder
 probabilities or demo values.
 
+## Chronological training dry-run (`ml/dry_run.py`)
+
+`run_training_dry_run(...)` exercises the whole offline path end-to-end —
+`SilverPointInTimeProvider` → `TrainingExampleBuilder` → chronological split +
+purged walk-forward + leakage checks → feature-coverage & label diagnostics →
+(optionally) fit candidate Models 1–3 → a **sufficiency verdict** — to answer
+"are the wired point-in-time features and available history actually sufficient
+to train?" *before* any model is approved.
+
+It is a training-side tool and **fails closed**: it refuses to run unless
+`ENABLE_ML` + `ENABLE_ML_TRAINING` are set in the passed settings, model fitting
+additionally needs scikit-learn, and it only ever registers **candidate**
+(never approved) artifacts — synthetic-data runs can never be promoted. It
+accepts either a symbol set + prediction dates (builds from validated Silver) or
+a pre-built dataset. The report includes fold purge/embargo counts, any leakage
+findings, per-feature-group coverage, label class balance / return variance, and
+a structured `sufficiency` block with human-readable notes (including the
+expected always-missing groups: earnings, macro).
+
+An operator CLI wraps it for real-data runs (in an environment with market-data
+access):
+
+```
+python -m catalystiq.ml.dry_run_cli \
+    --symbols AAPL,MSFT,NVDA,JPM,XOM --benchmark SPY \
+    --start 2020-01-01 --end 2021-06-30 --horizon 5 --enable --ingest
+```
+
+`--enable` turns on `ENABLE_ML`+`ENABLE_ML_TRAINING` for that process only (no
+persisted config change, no inference/serving/approval); `--ingest` refreshes
+each symbol's Silver via the app's own pipeline first, reporting (never faking)
+any per-symbol fetch failure. It prints the `DryRunReport` JSON and exits
+non-zero when the data is not yet sufficient for training.
+
 ## What remains before any model can be approved
 
 1. **Real point-in-time data wiring** — *price-derived + rule-based groups are
@@ -215,7 +249,15 @@ probabilities or demo values.
    trained on synthetic/demo data.
 3. **Chronological training + evaluation runs** with the walk-forward
    splitter, reporting the full metric batteries per horizon/sector/regime/
-   liquidity/direction.
+   liquidity/direction. *The offline runner for this now exists* —
+   `catalystiq/ml/experiment.py` + `catalystiq/ml/train_cli.py`, with MLflow
+   experiment tracking (parent/child runs, metrics, artifacts). It fails closed,
+   runs the sufficiency/leakage/chronology gates first and refuses to train on
+   failure, generates out-of-fold Model 1–3 predictions before Model 4, and
+   evaluates once on the untouched holdout after candidate selection. See
+   `ML_VALIDATION_MLFLOW.md`. It still approves nothing — running it on a real,
+   broad, regime-diverse, delisting-aware history is the remaining data-side
+   work.
 4. **Serving loader** for approved serialized artifacts (intentionally not
    wired yet — inference fails closed even if artifacts were approved).
 5. **Explicit human approval** in the registry, per family/direction/horizon.
