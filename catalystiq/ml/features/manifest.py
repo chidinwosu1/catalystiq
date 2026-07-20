@@ -75,12 +75,17 @@ _GROUP_STATUS: dict[FeatureGroup, tuple[SourceStatus, str]] = {
         "Point-in-time earnings calendar from an approved licensed source not yet wired (recorded MISSING).",
     ),
     FeatureGroup.FUNDAMENTALS: (
-        SourceStatus.INTEGRATION_EXISTS_NOT_PIT,
-        "SEC EDGAR filings ingested; original+amended PIT fundamentals read not yet mapped (recorded MISSING).",
+        SourceStatus.WIRED,
+        f"Wired: {_PIT} + catalystiq.ml.features.fundamentals_pit read SEC XBRL facts with "
+        "filing_date <= as_of and latest-vintage/amendment selection (revisions filed later are "
+        "never used). Fails closed (MISSING) when the CIK or required periods are absent.",
     ),
     FeatureGroup.MACRO: (
         SourceStatus.INTEGRATION_EXISTS_NOT_PIT,
-        "BLS/BEA ingested; as-released (vintage) PIT read not yet mapped (recorded MISSING). FRED is BLOCKED.",
+        "Strict vintage read implemented (catalystiq.ml.features.macro_pit): a value is used only "
+        "if released as of the prediction date. BLS carries no realtime vintage and BEA is stored "
+        "current-state only, so both FAIL CLOSED (MISSING) until a vintage-preserving ingestion "
+        "lands - the read then lights up automatically. FRED is BLOCKED.",
     ),
     FeatureGroup.RULE_BASED: (
         SourceStatus.WIRED,

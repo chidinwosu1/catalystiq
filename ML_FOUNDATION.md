@@ -116,14 +116,38 @@ so the feature vector is **look-ahead invariant**: identical whether or not
 future bars exist in the database (asserted in tests). `get_executable_entry`
 returns the *next* session's open (offline only; `None` at live inference).
 
-Wired now (36 features): adjusted OHLCV, trend/MA, momentum, RSI/MACD,
+Wired now (39 features): adjusted OHLCV, trend/MA, momentum, RSI/MACD,
 volatility/ATR, volume/relative-volume, liquidity/estimated-spread, gaps,
 market/sector, relative strength, beta, **market regime** (a versioned,
 deterministic trend×volatility classifier over point-in-time benchmark bars,
-`features/regime.py`), the Rule-Based Opportunity Score and its factor
-sub-scores, missingness indicators, and data-quality/freshness. Still recorded
-as gaps (MISSING, never fabricated): earnings proximity, point-in-time SEC
-fundamentals, macro vintages, support/resistance distances.
+`features/regime.py`), **point-in-time SEC fundamentals** (revenue YoY, gross
+margin, recent-filing flag — see below), the Rule-Based Opportunity Score and
+its factor sub-scores, missingness indicators, and data-quality/freshness.
+Still recorded as gaps (MISSING, never fabricated): earnings proximity, and the
+BLS/BEA macro features (see the vintage note below).
+
+### Point-in-time vintages: SEC, BLS, BEA (`features/fundamentals_pit.py`, `features/macro_pit.py`)
+
+These use **only the value/amendment released as of the prediction timestamp —
+never a later revision**:
+
+- **SEC fundamentals (truly point-in-time, wired).** XBRL facts are eligible
+  only if `filing_date <= as_of`; among eligible vintages of one
+  (concept, unit, period) the latest `filing_date` wins, so an amendment that
+  *was* public supersedes the original while one filed later is invisible.
+  `pit_revenue_yoy`, `pit_gross_margin`, and `recent_filing_event` are computed
+  with per-feature provenance (`available_at` = the governing filing date).
+  Fails closed (MISSING) when the CIK or required periods are absent.
+- **BLS (fails closed).** BLS observations carry no realtime vintage
+  (`realtime_start` is null; a revision overwrites in place), so a legitimate
+  as-of value cannot be established — `macro_cpi_yoy_pit` is MISSING. The
+  vintage read is written correctly and lights up automatically if a
+  vintage-preserving ingestion lands (a test proves the read against seeded
+  vintages, and that a future-dated revision is excluded).
+- **BEA (fails closed).** BEA values are stored current-state only (no realtime
+  dimension), so `macro_gdp_qoq_pit` is MISSING — the possibly-revised stored
+  value is never read.
+- **FRED** remains BLOCKED from ML features entirely.
 
 ## Labels & executable entry
 
@@ -174,12 +198,14 @@ probabilities or demo values.
 
 1. **Real point-in-time data wiring** — *price-derived + rule-based groups are
    now wired* via `SilverPointInTimeProvider` (validated Silver bars + analysis
-   snapshots + the rule-based Opportunity Score contract + a versioned
-   point-in-time market-regime classifier). Remaining gaps to wire before
-   full-feature training: a point-in-time earnings calendar (needs a licensed,
-   timestamped feed), original+amended SEC PIT fundamentals, BLS/BEA vintage
-   (as-released) reads, and support/resistance distances. See
-   `feature_requirements.json` for the live status of each group.
+   snapshots + rule-based Opportunity Score + market-regime classifier +
+   **point-in-time SEC fundamentals** with amendment/vintage handling). The
+   **BLS/BEA vintage reads are implemented and fail closed** until a
+   vintage-preserving ingestion lands. Remaining before full-feature training:
+   a point-in-time earnings calendar (needs a licensed, timestamped feed),
+   vintage-preserving BLS/BEA ingestion (to activate the already-written macro
+   reads), and support/resistance distances. See `feature_requirements.json`
+   for the live status of each group.
 2. **A real historical dataset** — successful/unsuccessful/**delisted**
    securities, point-in-time universe membership, corporate-action
    adjustment, cost estimates, full provenance. No user-facing artifact may be

@@ -33,6 +33,8 @@ from catalystiq.analysis.opportunity_score import build_opportunity_score
 from catalystiq.pipelines.freshness import FreshnessPolicy
 from catalystiq.schemas.market_data import OHLCVBar
 from catalystiq.ml.features.schema import DataQualityStatus, PointInTimeFeature
+from catalystiq.ml.features.fundamentals_pit import pit_fundamental_features
+from catalystiq.ml.features.macro_pit import pit_macro_features
 from catalystiq.ml.labels.barriers import Bar
 
 # Provider label recorded on every computed feature. "computed" is an OPEN
@@ -244,11 +246,18 @@ class SilverPointInTimeProvider:
         regime_code = snaps.regime.code if snaps.regime and snaps.regime.available else None
         features.append(mk("market_regime", float(regime_code) if regime_code is not None else None))
 
-        # --- groups with no validated PIT source yet (recorded, not faked)-
-        for name in ("trading_days_to_earnings",
-                     "pit_revenue_yoy", "pit_gross_margin", "recent_filing_event",
-                     "macro_cpi_yoy_pit", "macro_gdp_qoq_pit"):
-            features.append(mk(name, None, DataQualityStatus.MISSING))
+        # --- SEC fundamentals (vintage- and amendment-correct, point-in-time)
+        last_closed = self.freshness_policy.latest_expected_session(prediction_timestamp)
+        as_of_date = last_closed or bars[-1].date
+        features += pit_fundamental_features(
+            self.db, symbol, prediction_timestamp, as_of=as_of_date, retrieved_at=retrieved
+        )
+        # --- BLS / BEA macro (strict vintage read; fails closed) ----------
+        features += pit_macro_features(
+            self.db, symbol, prediction_timestamp, as_of=as_of_date, retrieved_at=retrieved
+        )
+        # --- earnings proximity: no legitimate timestamped source yet -----
+        features.append(mk("trading_days_to_earnings", None, DataQualityStatus.MISSING))
 
         # --- rule-based opportunity score + factors ----------------------
         features += _rule_based_features(mk, snaps.opportunity)

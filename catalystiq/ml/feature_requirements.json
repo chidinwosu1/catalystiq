@@ -3,9 +3,9 @@
   "generated_by": "catalystiq.ml.features.manifest",
   "note": "Machine-readable record of the point-in-time features each model family needs and whether a provider-neutral source is wired. Features without a wired source are recorded here, never fabricated. No model may train on real data until every feature it requires is 'wired'.",
   "counts_by_status": {
-    "integration_exists_not_point_in_time": 7,
+    "integration_exists_not_point_in_time": 4,
     "unavailable": 1,
-    "wired": 36
+    "wired": 39
   },
   "blocking_unavailable": [
     "earnings_proximity"
@@ -198,7 +198,7 @@
       "group": "macro_bls_bea",
       "description": "BLS CPI YoY as released",
       "source_status": "integration_exists_not_point_in_time",
-      "source_note": "BLS/BEA ingested; as-released (vintage) PIT read not yet mapped (recorded MISSING). FRED is BLOCKED.",
+      "source_note": "Strict vintage read implemented (catalystiq.ml.features.macro_pit): a value is used only if released as of the prediction date. BLS carries no realtime vintage and BEA is stored current-state only, so both FAIL CLOSED (MISSING) until a vintage-preserving ingestion lands - the read then lights up automatically. FRED is BLOCKED.",
       "required_by": [
         "model_2",
         "model_4",
@@ -210,7 +210,7 @@
       "group": "macro_bls_bea",
       "description": "BEA GDP QoQ as released",
       "source_status": "integration_exists_not_point_in_time",
-      "source_note": "BLS/BEA ingested; as-released (vintage) PIT read not yet mapped (recorded MISSING). FRED is BLOCKED.",
+      "source_note": "Strict vintage read implemented (catalystiq.ml.features.macro_pit): a value is used only if released as of the prediction date. BLS carries no realtime vintage and BEA is stored current-state only, so both FAIL CLOSED (MISSING) until a vintage-preserving ingestion lands - the read then lights up automatically. FRED is BLOCKED.",
       "required_by": [
         "model_2",
         "model_4",
@@ -382,8 +382,8 @@
       "feature_name": "pit_gross_margin",
       "group": "sec_fundamentals",
       "description": "PIT gross margin",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "SEC EDGAR filings ingested; original+amended PIT fundamentals read not yet mapped (recorded MISSING).",
+      "source_status": "wired",
+      "source_note": "Wired: catalystiq.ml.features.pit_provider.SilverPointInTimeProvider + catalystiq.ml.features.fundamentals_pit read SEC XBRL facts with filing_date <= as_of and latest-vintage/amendment selection (revisions filed later are never used). Fails closed (MISSING) when the CIK or required periods are absent.",
       "required_by": [
         "model_1",
         "model_4"
@@ -393,8 +393,8 @@
       "feature_name": "pit_revenue_yoy",
       "group": "sec_fundamentals",
       "description": "PIT revenue YoY growth",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "SEC EDGAR filings ingested; original+amended PIT fundamentals read not yet mapped (recorded MISSING).",
+      "source_status": "wired",
+      "source_note": "Wired: catalystiq.ml.features.pit_provider.SilverPointInTimeProvider + catalystiq.ml.features.fundamentals_pit read SEC XBRL facts with filing_date <= as_of and latest-vintage/amendment selection (revisions filed later are never used). Fails closed (MISSING) when the CIK or required periods are absent.",
       "required_by": [
         "model_1",
         "model_4"
@@ -404,8 +404,8 @@
       "feature_name": "recent_filing_event",
       "group": "sec_fundamentals",
       "description": "Recent 8-K/10-Q event flag",
-      "source_status": "integration_exists_not_point_in_time",
-      "source_note": "SEC EDGAR filings ingested; original+amended PIT fundamentals read not yet mapped (recorded MISSING).",
+      "source_status": "wired",
+      "source_note": "Wired: catalystiq.ml.features.pit_provider.SilverPointInTimeProvider + catalystiq.ml.features.fundamentals_pit read SEC XBRL facts with filing_date <= as_of and latest-vintage/amendment selection (revisions filed later are never used). Fails closed (MISSING) when the CIK or required periods are absent.",
       "required_by": [
         "model_1",
         "model_4"
