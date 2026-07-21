@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Info, Loader2 } from "lucide-react";
 import WorkflowBar from "../components/trade/WorkflowBar";
-import { ApiError, getOpportunityScanShared, type OpportunityScore } from "../lib/api";
+import {
+  ApiError,
+  getOpportunityScan,
+  getOpportunityScanShared,
+  type OpportunityScan,
+  type OpportunityScore,
+} from "../lib/api";
 import { useLiveQuotes } from "../lib/liveData";
 import type { PageId } from "../types/nav";
 
@@ -110,24 +116,45 @@ export default function TradeCenterPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // The backend serves the scan from a warm cache and returns a fast "warming
+  // up" placeholder (empty candidates + a warming note) when it's cold, rather
+  // than blocking the request on a multi-second cold scan. So we never hang on
+  // the spinner; instead, when we get the warming placeholder, we poll (bypassing
+  // the 30s share cache) until the background warm fills in real candidates.
   useEffect(() => {
     let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 24; // ~2 min at 5s spacing
+
+    const isWarming = (scan: OpportunityScan) =>
+      scan.candidates.length === 0 && !!scan.note && /warming/i.test(scan.note);
+
+    const load = (useShared: boolean) => {
+      (useShared ? getOpportunityScanShared(4) : getOpportunityScan(4))
+        .then((scan) => {
+          if (!alive) return;
+          setCandidates(scan.candidates);
+          setNote(scan.note);
+          setLoading(false);
+          if (isWarming(scan) && attempts < MAX_ATTEMPTS) {
+            attempts += 1;
+            timer = setTimeout(() => load(false), 5000); // non-shared so we see fresh state
+          }
+        })
+        .catch((e) => {
+          if (!alive) return;
+          setError(e instanceof ApiError ? e.message : "Could not load candidates.");
+          setLoading(false);
+        });
+    };
+
     setLoading(true);
     setError(null);
-    getOpportunityScanShared(4)
-      .then((scan) => {
-        if (!alive) return;
-        setCandidates(scan.candidates);
-        setNote(scan.note);
-      })
-      .catch((e) => {
-        if (alive) setError(e instanceof ApiError ? e.message : "Could not load candidates.");
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
+    load(true);
     return () => {
       alive = false;
+      if (timer) clearTimeout(timer);
     };
   }, []);
 

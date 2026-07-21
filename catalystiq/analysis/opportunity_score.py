@@ -571,3 +571,107 @@ def scan_universe_cached(
         with _SCAN_CACHE_LOCK:
             _SCAN_CACHE[key] = _ScanCacheEntry(scan=scan, stored_at=monotonic())
     return scan
+
+
+# --- Non-blocking scan for the request path ---------------------------------
+# A cold scan can take tens of seconds (it ingests history for the whole
+# universe through a rate-limited provider). Running that on the request thread
+# leaves the UI stuck on "Scanning the universe…" indefinitely. Instead the
+# user-facing endpoint serves whatever is cached (even slightly stale) and, when
+# nothing is cached yet, kicks a SINGLE-FLIGHT background compute and returns a
+# fast "warming up" placeholder. The background warmer still refreshes on its
+# own schedule; this just guarantees the request never blocks on a cold scan.
+
+_SCAN_INFLIGHT: set[tuple] = set()  # keys with a background compute running
+
+
+def _warming_scan(now: dt.datetime, top: int, symbols: tuple[str, ...]) -> OpportunityScan:
+    """A fast, real (non-mock) OpportunityScan placeholder returned while the
+    real scan is still being computed in the background."""
+    return OpportunityScan(
+        as_of=now if now.tzinfo else now.replace(tzinfo=dt.timezone.utc),
+        formula_version=FORMULA_VERSION,
+        universe_size=len(symbols),
+        eligible_count=0,
+        top=max(0, min(top, _MAX_SCAN_TOP)),
+        candidates=[],
+        ml=_ML_NOT_AVAILABLE,
+        note="Opportunity setups are warming up — check back in a moment.",
+    )
+
+
+def _run_background_scan(top: int, universe, key: tuple, monotonic=_time.monotonic) -> None:
+    """Compute the scan with a fresh session + provider and cache it. Runs in a
+    daemon thread so a cold/slow scan never blocks the request. Always clears the
+    in-flight marker, even on failure, so a later request can retry."""
+    try:
+        from catalystiq.db.base import SessionLocal
+        from catalystiq.providers.market_data import get_market_data_provider
+
+        db = SessionLocal()
+        try:
+            scan = scan_universe(
+                get_market_data_provider(),
+                db,
+                dt.datetime.now(dt.timezone.utc),
+                top=top,
+                universe=universe,
+            )
+            with _SCAN_CACHE_LOCK:
+                _SCAN_CACHE[key] = _ScanCacheEntry(scan=scan, stored_at=monotonic())
+        finally:
+            db.close()
+    except Exception:  # pragma: no cover - defensive; a failed warm just retries
+        _logger.exception("background scan warm failed for %s", key)
+    finally:
+        with _SCAN_CACHE_LOCK:
+            _SCAN_INFLIGHT.discard(key)
+
+
+def _start_background_scan(top: int, universe, key: tuple) -> None:
+    """Spawn the background compute. Isolated so tests can stub it out."""
+    _threading.Thread(
+        target=_run_background_scan, args=(top, universe, key), daemon=True
+    ).start()
+
+
+def scan_universe_fast(
+    now: dt.datetime,
+    top: int = 4,
+    universe=None,
+    *,
+    ttl_seconds: float | None = None,
+    monotonic=_time.monotonic,
+) -> OpportunityScan:
+    """Non-blocking scan for the request path. Returns the cached scan if present
+    (serving a slightly-stale one rather than blocking on recompute) and kicks a
+    single-flight background refresh when the cache is cold or expired; when
+    nothing is cached yet, returns a fast "warming up" placeholder. The cold
+    ingest/scoring loop never runs on the calling (request) thread."""
+    if ttl_seconds is None:
+        from catalystiq.config import get_settings
+
+        ttl_seconds = get_settings().opportunity_scan_cache_ttl_seconds
+
+    symbols = tuple(universe) if universe else SCAN_UNIVERSE
+    top_c = max(0, min(top, _MAX_SCAN_TOP))
+    key = (symbols, top_c)
+
+    with _SCAN_CACHE_LOCK:
+        entry = _SCAN_CACHE.get(key)
+        is_fresh = (
+            entry is not None and ttl_seconds > 0 and (monotonic() - entry.stored_at) < ttl_seconds
+        )
+        needs_warm = entry is None or not is_fresh
+        should_start = needs_warm and key not in _SCAN_INFLIGHT
+        if should_start:
+            _SCAN_INFLIGHT.add(key)
+
+    if should_start:
+        _start_background_scan(top, universe, key)
+
+    # Prefer a real (possibly stale) scan over the placeholder; the background
+    # refresh above will replace it shortly.
+    if entry is not None:
+        return entry.scan
+    return _warming_scan(now, top_c, symbols)

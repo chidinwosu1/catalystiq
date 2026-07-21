@@ -17,7 +17,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from catalystiq.analysis.market_context import SECTOR_ETF_MAP
-from catalystiq.analysis.opportunity_score import scan_universe_cached, score_symbol
+from catalystiq.analysis.opportunity_score import (
+    scan_universe_cached,
+    scan_universe_fast,
+    score_symbol,
+)
 from catalystiq.auth import verify_action_key
 from catalystiq.db.base import get_db
 from catalystiq.pipelines.market_price_pipeline import GoldProduct, build_gold, ensure_fresh
@@ -90,12 +94,17 @@ def get_opportunity_scan(
     engine, and return the top-N ranked candidates (only fully-eligible
     'available' scores qualify; unfetchable/ineligible symbols are skipped, never
     mock-filled)."""
-    universe = None
+    now = dt.datetime.now(dt.timezone.utc)
     if symbols:
+        # Explicit ad-hoc universe: no background warmer backs it, so compute
+        # inline (cached) as before.
         universe = [s.strip().upper() for s in symbols.split(",") if s.strip()]
-    return scan_universe_cached(
-        provider, db, now=dt.datetime.now(dt.timezone.utc), top=top, universe=universe
-    )
+        return scan_universe_cached(provider, db, now=now, top=top, universe=universe)
+    # Default universe: never block the request on a cold scan. Serve cache (even
+    # slightly stale) and warm in the background, returning a fast "warming up"
+    # placeholder only when nothing is cached yet. Prevents the UI from hanging
+    # on "Scanning the universe…".
+    return scan_universe_fast(now, top=top)
 
 
 @router.get("/{symbol}/opportunity-score", response_model=OpportunityScore)
