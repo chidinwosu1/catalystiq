@@ -237,6 +237,100 @@ def test_orchestrator_scores_from_a_real_intraday_provider():
     assert 0 <= r.score <= 100
 
 
+# --- Plain-language Entry Check verdict layer -------------------------------
+
+_USER_STATUSES = {
+    "Entry Looks Favorable", "Almost Ready — Keep Watching", "Wait for a Lower Price",
+    "Avoid This Entry for Now", "Cannot Evaluate Right Now",
+}
+
+
+def test_entry_check_always_present_even_when_insufficient():
+    r = build_entry_quality_score("TEST", [], now=_NOW)
+    assert r.status == "insufficient_data"
+    ec = r.entry_check
+    assert ec is not None
+    assert ec.system_status == "data_unavailable"
+    assert ec.user_status == "Cannot Evaluate Right Now"
+    assert ec.data_state == "unavailable"
+    # Never zero-filled: missing values are None, not 0.
+    assert ec.current_price is None and ec.preferred_entry_low is None
+    assert ec.exit_level is None and ec.reward_to_risk is None
+
+
+def test_entry_check_available_has_plain_language_and_prices():
+    bars, _ = _healthy_dataset()
+    r = build_entry_quality_score("TEST", bars, now=_NOW, setup_is_strong=True)
+    ec = r.entry_check
+    assert ec is not None
+    assert ec.system_status in {"favorable", "almost_ready", "wait_for_pullback", "avoid"}
+    assert ec.user_status in _USER_STATUSES
+    assert ec.data_state == "current"
+    # A user-facing verdict never says "Buy Now".
+    assert "buy now" not in ec.user_status.lower()
+    assert "buy now" not in ec.headline.lower()
+    # Prices are real numbers with a well-ordered preferred band.
+    assert ec.preferred_entry_low is not None and ec.preferred_entry_high is not None
+    assert ec.preferred_entry_low <= ec.preferred_entry_high
+    assert ec.exit_level is not None and ec.exit_level < ec.preferred_entry_low
+    # Exactly four plain-language checklist reasons.
+    assert len(ec.reasons) == 4
+    assert {r.state for r in ec.reasons} <= {"good", "bad", "pending"}
+    assert all(r.label and not any(t in r.label for t in ("VWAP", "EMA", "RSI", "ATR")) for r in ec.reasons)
+    # The simple explanation avoids technical jargon.
+    for term in ("VWAP", "EMA", "RSI", "ATR", "reward-to-risk", "invalidation"):
+        assert term.lower() not in ec.headline.lower()
+        assert term.lower() not in ec.what_to_do.lower()
+
+
+def test_extended_price_waits_for_a_lower_price():
+    # Parabolic run leaves price far above the VWAP/EMA entry zone.
+    closes = [100 + i * 0.5 for i in range(30)]
+    bars = _prior_sessions(20, 30, 100_000) + _session(_SESSION_OPEN, closes, volume=120_000)
+    r = build_entry_quality_score("TEST", bars, now=_NOW, setup_is_strong=True)
+    ec = r.entry_check
+    assert ec.system_status == "wait_for_pullback"
+    assert ec.user_status == "Wait for a Lower Price"
+    assert ec.distance_to_entry_pct > 0
+    # A strong setup is reflected in the checklist and headline.
+    setup = next(x for x in ec.reasons if x.key == "setup_strong")
+    assert setup.state == "good"
+    assert "strong overall setup" in ec.headline
+
+
+def test_latest_price_moves_verdict_without_touching_component_scores():
+    # Same completed candles; a fresher (lower) live price pulls the verdict
+    # toward the entry zone while the seven component scores are unchanged.
+    bars, _ = _healthy_dataset()
+    base = build_entry_quality_score("TEST", bars, now=_NOW, setup_is_strong=True)
+    vwap = float(next(c for c in base.components if c.name == "vwap_distance").inputs["vwap"])
+    withprice = build_entry_quality_score(
+        "TEST", bars, now=_NOW, setup_is_strong=True, latest_price=vwap
+    )
+    # Component scores (completed-candle) are identical regardless of latest_price.
+    assert [c.score for c in base.components] == [c.score for c in withprice.components]
+    assert base.score == withprice.score
+    # But the verdict's current price tracked the live quote.
+    assert withprice.entry_check.current_price == round(vwap, 2)
+
+
+def test_orchestrator_uses_best_effort_quote_for_current_price():
+    from catalystiq.schemas.market_data import Quote
+
+    bars, _ = _healthy_dataset()
+
+    class _QuoteProvider:
+        def get_intraday_ohlcv(self, symbol, *, interval="5m", days=20):
+            return bars
+
+        def get_quote(self, symbol):
+            return Quote(symbol=symbol.upper(), price=123.45,
+                         as_of=dt.datetime.now(dt.timezone.utc))
+
+    r = score_entry_quality("TEST", _QuoteProvider(), _NOW, setup_is_strong=True)
+    assert r.entry_check.current_price == 123.45
+
+
 # --- Integration: both scores ride together on each scan candidate ----------
 
 

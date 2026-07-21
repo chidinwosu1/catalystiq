@@ -31,6 +31,44 @@ class EntryQualityComponent(BaseModel):
     formula_version: str
 
 
+class EntryReason(BaseModel):
+    """One plain-language decision reason for the checklist. ``state`` drives the
+    ✓ / ✕ / ○ marker; ``label`` is already user-facing (no indicator jargon)."""
+
+    key: str
+    label: str
+    state: str  # "good" (checkmark) | "bad" (cross) | "pending" (waiting)
+
+
+class EntryCheck(BaseModel):
+    """A plain-language, non-technical verdict layer over the Entry Quality
+    components, answering the four user questions: enter now or wait, what price
+    to wait for, why, and where to exit. All text is TEMPLATED from validated
+    decision reasons - never free-form AI prose. Prices are derived from the same
+    intraday inputs the component scores use."""
+
+    system_status: str  # favorable | almost_ready | wait_for_pullback | avoid | data_unavailable
+    user_status: str  # "Entry Looks Favorable" .. "Cannot Evaluate Right Now"
+    headline: str  # <= 2 short sentences
+    what_to_do: str  # <= 2 short sentences
+    current_price: float | None
+    preferred_entry_low: float | None
+    preferred_entry_high: float | None
+    distance_to_entry_pct: float | None  # +above range / -below range / 0 in range
+    exit_level: float | None
+    target: float | None
+    possible_loss_per_share: float | None
+    possible_gain_per_share: float | None
+    reward_to_risk: float | None
+    confirmation: bool  # price has started recovering (higher-low)
+    confirmation_label: str
+    reasons: list[EntryReason]
+    # "current" when computed from a complete intraday snapshot; "unavailable"
+    # when it can't be evaluated. The frontend refines this to delayed / stale
+    # using the response age and the provider's real-time classification.
+    data_state: str
+
+
 class EntryQualityScore(BaseModel):
     """A real-time 0..100 read of how attractive the *current moment* is as an
     entry, computed from intraday bars only. Independent of Setup Strength."""
@@ -49,3 +87,6 @@ class EntryQualityScore(BaseModel):
     components: list[EntryQualityComponent]
     warnings: list[str]
     reason: str | None = None  # populated when status == "insufficient_data"
+    # Plain-language verdict layer for the Entry Check pop-out. Always present so
+    # the UI can show a clear answer (even "Cannot Evaluate Right Now").
+    entry_check: EntryCheck | None = None

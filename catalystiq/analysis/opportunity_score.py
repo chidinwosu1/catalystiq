@@ -443,8 +443,9 @@ def _with_entry_quality(score: OpportunityScore, provider, now: dt.datetime) -> 
     an ``insufficient_data`` entry-quality block, never dropping the candidate."""
     from catalystiq.analysis.entry_quality import score_entry_quality
 
+    setup_is_strong = score.label in ("Strong setup", "Favorable setup")
     try:
-        eq = score_entry_quality(score.symbol, provider, now)
+        eq = score_entry_quality(score.symbol, provider, now, setup_is_strong=setup_is_strong)
     except Exception:  # pragma: no cover - defensive; entry quality never blocks
         _logger.exception("entry-quality scoring failed for %s", score.symbol)
         return score

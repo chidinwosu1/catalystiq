@@ -31,7 +31,12 @@ import datetime as dt
 import numpy as np
 import pandas as pd
 
-from catalystiq.schemas.entry_quality import EntryQualityComponent, EntryQualityScore
+from catalystiq.schemas.entry_quality import (
+    EntryCheck,
+    EntryQualityComponent,
+    EntryQualityScore,
+    EntryReason,
+)
 from catalystiq.schemas.market_data import IntradayBar
 
 FORMULA_VERSION = "entry_quality_v1"
@@ -382,6 +387,199 @@ def _score_risk_reward(
     return _component("risk_reward", score, inputs, expl)
 
 
+# --- Plain-language Entry Check verdict layer -------------------------------
+# A non-technical translation of the seven component scores into the four
+# answers a user actually needs: enter now or wait, what price to wait for, why,
+# and where to exit. All text is TEMPLATED from validated decision reasons -
+# never free-form model prose (acceptance criterion 5).
+
+# System status -> the exact user-facing label (acceptance criterion: no
+# "Buy Now"; five fixed statuses).
+_USER_STATUS: dict[str, str] = {
+    "favorable": "Entry Looks Favorable",
+    "almost_ready": "Almost Ready — Keep Watching",
+    "wait_for_pullback": "Wait for a Lower Price",
+    "avoid": "Avoid This Entry for Now",
+    "data_unavailable": "Cannot Evaluate Right Now",
+}
+
+# A price within this fraction of the preferred range counts as "near" it.
+_NEAR_BAND = 0.003
+# Preferred entry band padding around the VWAP/9-EMA anchor zone.
+_ENTRY_GIVE = 0.0015
+# Minimum plain-language reward:risk before we'll call an entry "favorable".
+_MIN_FAVORABLE_RR = 1.5
+
+
+def _money(v: float | None) -> str:
+    return f"${v:.2f}" if v is not None else "—"
+
+
+def _reason(key: str, state: str, label: str) -> EntryReason:
+    return EntryReason(key=key, label=label, state=state)
+
+
+def _data_unavailable_check(reason_text: str) -> EntryCheck:
+    """A well-formed 'Cannot Evaluate Right Now' verdict so the UI always has a
+    clear answer to show - never a wall of blank/zero numbers."""
+    return EntryCheck(
+        system_status="data_unavailable",
+        user_status=_USER_STATUS["data_unavailable"],
+        headline="There isn't enough live intraday data to evaluate an entry right now.",
+        what_to_do="Live intraday data isn't available yet, so there's nothing to act on.",
+        current_price=None, preferred_entry_low=None, preferred_entry_high=None,
+        distance_to_entry_pct=None, exit_level=None, target=None,
+        possible_loss_per_share=None, possible_gain_per_share=None, reward_to_risk=None,
+        confirmation=False, confirmation_label="Waiting for price to start recovering",
+        reasons=[], data_state="unavailable",
+    )
+
+
+def _component_by(components: list[EntryQualityComponent], name: str) -> EntryQualityComponent:
+    for c in components:
+        if c.name == name:
+            return c
+    raise KeyError(name)  # pragma: no cover - callers pass a complete set
+
+
+def _detect_recovering(today: pd.DataFrame) -> bool:
+    """Has price started to recover? A higher-low with an up-close on the last
+    completed bar. Uses COMPLETED candles only (acceptance criterion 8)."""
+    if len(today) < 2:
+        return False
+    last, prev = today.iloc[-1], today.iloc[-2]
+    return bool(last["close"] > prev["close"] and last["low"] >= prev["low"])
+
+
+def _build_entry_check(
+    symbol: str,
+    today: pd.DataFrame,
+    components: list[EntryQualityComponent],
+    *,
+    latest_price: float | None,
+    setup_is_strong: bool | None,
+) -> EntryCheck:
+    """Translate the (all-available) component scores into the plain-language
+    verdict. Candle-based inputs come from the completed-candle component math;
+    only the *current price* and its distances may reflect ``latest_price`` (a
+    15s-fresh quote), so a partial candle never corrupts the scores."""
+    sym = symbol.upper()
+    vwap = float(_component_by(components, "vwap_distance").inputs["vwap"])
+    ema9 = float(_component_by(components, "ema9_distance").inputs["ema9"])
+    mre = _component_by(components, "morning_range_extension").inputs
+    atr = float(mre["intraday_atr"])
+    rr_in = _component_by(components, "risk_reward").inputs
+    support = float(rr_in["nearest_support"])
+    reward = float(rr_in["reward"])
+    relvol_score = _component_by(components, "relative_volume").score or 0
+
+    close = float(today["close"].iloc[-1])
+    current = float(latest_price) if latest_price is not None else close
+
+    # Preferred entry band: a pullback into the VWAP / 9-EMA zone.
+    anchor_low, anchor_high = min(vwap, ema9), max(vwap, ema9)
+    low = round(anchor_low * (1 - _ENTRY_GIVE), 2)
+    high = round(anchor_high * (1 + _ENTRY_GIVE), 2)
+    entry_mid = round((low + high) / 2, 2)
+
+    exit_level = round(min(support, low) - 0.15 * atr, 2)
+    target = round(close + reward, 2) if reward > 0 else None
+
+    possible_loss = round(entry_mid - exit_level, 2) if exit_level < entry_mid else None
+    possible_gain = (
+        round(target - entry_mid, 2) if target is not None and target > entry_mid else None
+    )
+    reward_to_risk = (
+        round(possible_gain / possible_loss, 1)
+        if possible_loss and possible_gain and possible_loss > 0
+        else None
+    )
+
+    in_range = low <= current <= high
+    if current > high:
+        distance = round((current - high) / high * 100, 2)
+    elif current < low:
+        distance = round((current - low) / low * 100, 2)
+    else:
+        distance = 0.0
+
+    recovering = _detect_recovering(today)
+    rr_ok = reward_to_risk is not None and reward_to_risk >= _MIN_FAVORABLE_RR
+
+    # Status decision (deterministic).
+    if current < support:
+        status = "avoid"
+    elif in_range:
+        status = "favorable" if (recovering and rr_ok) else "almost_ready"
+    elif current > high:
+        status = "almost_ready" if (current - high) / high <= _NEAR_BAND else "wait_for_pullback"
+    else:  # between support and the low edge of the preferred band
+        status = "almost_ready"
+
+    # Checklist reasons (plain language, four items).
+    if setup_is_strong is True:
+        r_setup = _reason("setup_strong", "good", "Overall stock setup is strong")
+    elif setup_is_strong is False:
+        r_setup = _reason("setup_strong", "bad", "Overall stock setup is weak")
+    else:
+        r_setup = _reason("setup_strong", "pending", "Overall stock setup not yet confirmed")
+
+    if in_range:
+        r_price = _reason("price_in_area", "good", "Current price is in the preferred entry area")
+    elif current > high:
+        r_price = _reason("price_in_area", "bad", "Current price is still too high")
+    else:
+        r_price = _reason("price_in_area", "bad", "Current price is below the preferred area")
+
+    if relvol_score >= 9:
+        r_activity = _reason("activity_healthy", "good", "Trading activity is healthy")
+    elif relvol_score == 5:
+        r_activity = _reason("activity_healthy", "bad", "Trading activity looks overheated")
+    else:
+        r_activity = _reason("activity_healthy", "bad", "Trading activity is light")
+
+    if recovering:
+        r_recover = _reason("recovering", "good", "Price has started recovering")
+    else:
+        r_recover = _reason("recovering", "pending", "Waiting for price to start recovering")
+
+    reasons = [r_setup, r_price, r_activity, r_recover]
+
+    # Templated headline + guidance per status.
+    if status == "favorable":
+        headline = f"{sym} is inside the preferred entry area and has started to recover."
+        what = ("The price is inside the preferred entry range and has started recovering. "
+                "Review the trade before making a decision.")
+    elif status == "wait_for_pullback":
+        headline = (
+            f"{sym} has a strong overall setup, but its current price is higher than the "
+            "preferred entry area." if setup_is_strong
+            else f"{sym}'s current price is higher than the preferred entry area."
+        )
+        what = f"Wait for {sym} to move between {_money(low)} and {_money(high)}."
+    elif status == "avoid":
+        headline = f"{sym} has fallen below its support level."
+        what = "The price has fallen below support. Wait for the setup to improve."
+    else:  # almost_ready
+        headline = f"{sym} is near the preferred entry area, but it has not started recovering yet."
+        what = f"Keep watching for {sym} to settle into {_money(low)}–{_money(high)} and start recovering."
+
+    return EntryCheck(
+        system_status=status, user_status=_USER_STATUS[status],
+        headline=headline, what_to_do=what,
+        current_price=round(current, 2),
+        preferred_entry_low=low, preferred_entry_high=high,
+        distance_to_entry_pct=distance,
+        exit_level=exit_level, target=target,
+        possible_loss_per_share=possible_loss, possible_gain_per_share=possible_gain,
+        reward_to_risk=reward_to_risk,
+        confirmation=recovering,
+        confirmation_label=("Price has started recovering" if recovering
+                            else "Waiting for price to start recovering"),
+        reasons=reasons, data_state="current",
+    )
+
+
 # --- Core -------------------------------------------------------------------
 
 
@@ -392,6 +590,8 @@ def build_entry_quality_score(
     now: dt.datetime,
     interval: str | None = None,
     prev_day_high: float | None = None,
+    latest_price: float | None = None,
+    setup_is_strong: bool | None = None,
 ) -> EntryQualityScore:
     """Pure, offline-testable core. ``intraday_bars`` are timestamped bars for
     the current session plus (ideally ~20) prior sessions, used to derive VWAP,
@@ -400,11 +600,16 @@ def build_entry_quality_score(
 
     A missing / insufficient input marks the owning component
     ``insufficient_data`` and (v1) returns the whole score as
-    ``insufficient_data`` rather than fabricating or renormalizing a number."""
+    ``insufficient_data`` rather than fabricating or renormalizing a number.
+
+    ``latest_price`` (an optional 15s-fresh quote) refreshes only the Entry Check
+    verdict's *current price* and its distances; the seven component scores stay
+    on completed candles so a partial candle never corrupts them. ``setup_is_strong``
+    (the daily Setup Strength band) feeds the plain-language checklist."""
     calculated_at = now if now.tzinfo else now.replace(tzinfo=dt.timezone.utc)
     warnings: list[str] = []
 
-    def _envelope(status, score, rating, components, data_as_of, reason):
+    def _envelope(status, score, rating, components, data_as_of, reason, entry_check):
         return EntryQualityScore(
             symbol=symbol.upper(), status=status, score_type="entry_quality",
             score=score, max_score=100, rating=rating,
@@ -412,11 +617,13 @@ def build_entry_quality_score(
             data_as_of=data_as_of, interval=interval,
             component_coverage=f"{sum(1 for c in components if c.status == 'available')}/7",
             components=components, warnings=warnings, reason=reason,
+            entry_check=entry_check,
         )
 
     if not intraday_bars:
         return _envelope("insufficient_data", None, None, [], None,
-                         "No intraday price history available.")
+                         "No intraday price history available.",
+                         _data_unavailable_check("No intraday price history available."))
 
     df = _to_frame(intraday_bars)
     latest_session = df["session"].iloc[-1]
@@ -429,7 +636,8 @@ def build_entry_quality_score(
 
     if len(today) < _MIN_TODAY_BARS:
         return _envelope("insufficient_data", None, None, [], data_as_of,
-                         "Too few intraday bars in the current session yet.")
+                         "Too few intraday bars in the current session yet.",
+                         _data_unavailable_check("Too few intraday bars in the current session yet."))
 
     price = float(today["close"].iloc[-1])
 
@@ -446,10 +654,14 @@ def build_entry_quality_score(
     missing = [c.name for c in components if c.status != "available"]
     if missing:
         reason = "Insufficient intraday data for component(s): " + ", ".join(missing) + "."
-        return _envelope("insufficient_data", None, None, components, data_as_of, reason)
+        return _envelope("insufficient_data", None, None, components, data_as_of, reason,
+                         _data_unavailable_check(reason))
 
     total = sum(c.score for c in components)
-    return _envelope("available", total, _rating(total), components, data_as_of, None)
+    entry_check = _build_entry_check(
+        symbol, today, components, latest_price=latest_price, setup_is_strong=setup_is_strong
+    )
+    return _envelope("available", total, _rating(total), components, data_as_of, None, entry_check)
 
 
 # --- Orchestrator: fetch intraday data + score (used by the endpoints) -------
@@ -465,7 +677,21 @@ def _insufficient_score(symbol: str, now: dt.datetime, reason: str) -> EntryQual
         score=None, max_score=100, rating=None, formula_version=FORMULA_VERSION,
         calculated_at=calculated_at, data_as_of=None, interval=_INTRADAY_INTERVAL,
         component_coverage="0/7", components=[], warnings=[], reason=reason,
+        entry_check=_data_unavailable_check(reason),
     )
+
+
+def _best_effort_quote(provider, symbol: str) -> float | None:
+    """A 15s-fresh current price for the verdict layer. Best-effort only: any
+    failure (no live feed) returns None and the score falls back to the last
+    completed close - never a fabricated price."""
+    getq = getattr(provider, "get_quote", None)
+    if not callable(getq):
+        return None
+    try:
+        return float(getq(symbol).price)
+    except Exception:
+        return None
 
 
 def score_entry_quality(
@@ -474,6 +700,7 @@ def score_entry_quality(
     now: dt.datetime,
     *,
     prev_day_high: float | None = None,
+    setup_is_strong: bool | None = None,
 ) -> EntryQualityScore:
     """Fetch fresh intraday bars for ``symbol`` and compute its Entry Quality.
 
@@ -481,7 +708,8 @@ def score_entry_quality(
     ``get_intraday_ohlcv``, a fetch failure, or empty data all degrade to an
     ``insufficient_data`` score (never a fabricated number), exactly like the
     Setup Strength engine degrades on missing inputs. Never raises for a data
-    problem - the caller can always attach the returned score."""
+    problem - the caller can always attach the returned score. ``setup_is_strong``
+    (the daily Setup Strength band) feeds the plain-language Entry Check checklist."""
     symbol = symbol.upper()
     fetch = getattr(provider, "get_intraday_ohlcv", None)
     if not callable(fetch):
@@ -499,5 +727,6 @@ def score_entry_quality(
             symbol, now, "No intraday bars returned for this symbol."
         )
     return build_entry_quality_score(
-        symbol, bars, now=now, interval=_INTRADAY_INTERVAL, prev_day_high=prev_day_high
+        symbol, bars, now=now, interval=_INTRADAY_INTERVAL, prev_day_high=prev_day_high,
+        latest_price=_best_effort_quote(provider, symbol), setup_is_strong=setup_is_strong,
     )

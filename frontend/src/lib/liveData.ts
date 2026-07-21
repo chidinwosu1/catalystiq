@@ -10,10 +10,12 @@
  */
 import {
   getAccount,
+  getEntryQualityScore,
   getPositions,
   getQuote,
   getQuotes,
   type AccountInfo,
+  type EntryQualityScore,
   type Position,
   type Quote,
   type QuoteResult,
@@ -51,4 +53,24 @@ export function useLiveQuote(symbol: string): LiveQueryResult<Quote> {
   return useLiveQuery<Quote>(sym ? `quote:${sym}` : "quote:none", () => getQuote(sym), {
     enabled: sym.length > 0,
   });
+}
+
+/**
+ * Live Entry Check (Entry Quality + plain-language verdict) for one symbol,
+ * refreshed on the shared 15s cadence. The key is per-symbol, so a Trade Center
+ * card's compact entry line and the open Entry Check pop-out for the same symbol
+ * share ONE polling loop and ONE in-flight request (no overlapping refreshes).
+ * Polling pauses when the tab is hidden and stops when `enabled` goes false
+ * (e.g. the user leaves Trade Center). Inert when blank.
+ */
+export function useLiveEntryCheck(
+  symbol: string,
+  enabled = true
+): LiveQueryResult<EntryQualityScore> {
+  const sym = symbol.trim().toUpperCase();
+  return useLiveQuery<EntryQualityScore>(
+    sym ? `entry-check:${sym}` : "entry-check:none",
+    () => getEntryQualityScore(sym),
+    { enabled: enabled && sym.length > 0 }
+  );
 }

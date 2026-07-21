@@ -459,6 +459,41 @@ export interface EntryQualityComponent {
   formula_version: string;
 }
 
+export interface EntryReason {
+  key: string;
+  label: string;
+  state: "good" | "bad" | "pending";
+}
+
+/**
+ * Plain-language verdict layer over the Entry Quality components. All text is
+ * templated server-side from validated decision reasons (never free AI prose).
+ */
+export interface EntryCheck {
+  system_status:
+    | "favorable"
+    | "almost_ready"
+    | "wait_for_pullback"
+    | "avoid"
+    | "data_unavailable";
+  user_status: string;
+  headline: string;
+  what_to_do: string;
+  current_price: number | null;
+  preferred_entry_low: number | null;
+  preferred_entry_high: number | null;
+  distance_to_entry_pct: number | null;
+  exit_level: number | null;
+  target: number | null;
+  possible_loss_per_share: number | null;
+  possible_gain_per_share: number | null;
+  reward_to_risk: number | null;
+  confirmation: boolean;
+  confirmation_label: string;
+  reasons: EntryReason[];
+  data_state: "current" | "unavailable";
+}
+
 /**
  * The real-time, intraday Entry Quality Score - INDEPENDENT of the daily Setup
  * Strength (OpportunityScore). Answers "is this a high-quality MOMENT to
@@ -479,6 +514,7 @@ export interface EntryQualityScore {
   components: EntryQualityComponent[];
   warnings: string[];
   reason: string | null;
+  entry_check: EntryCheck | null;
 }
 
 export interface OpportunityScore {

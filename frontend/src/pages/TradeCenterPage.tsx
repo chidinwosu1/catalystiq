@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Info, Loader2 } from "lucide-react";
 import WorkflowBar from "../components/trade/WorkflowBar";
+import EntryCheckModal from "../components/trade/EntryCheckModal";
 import {
   ApiError,
   getOpportunityScan,
@@ -9,7 +10,7 @@ import {
   type OpportunityScan,
   type OpportunityScore,
 } from "../lib/api";
-import { useLiveQuotes } from "../lib/liveData";
+import { useLiveEntryCheck, useLiveQuotes } from "../lib/liveData";
 import type { PageId } from "../types/nav";
 
 interface TradeCenterPageProps {
@@ -32,47 +33,35 @@ function bandTone(label: string | null): string {
   return "text-ink-primary";
 }
 
-// Entry Quality is INDEPENDENT of Setup Strength: a strong setup can still be a
-// poor entry when it's extended after a large morning move.
-function entryTone(rating: string | null): string {
-  if (rating === "Excellent Entry" || rating === "Good Entry") return "text-status-good";
-  if (rating === "Poor Entry" || rating === "Caution") return "text-status-critical";
-  return "text-ink-primary";
-}
+// The compact, plain-language Entry status shown on every card. Refreshes on the
+// shared 15s cadence (per symbol, deduped with the pop-out), never claims "live",
+// and keeps a fixed single-line height so the card never grows/shrinks on update.
+const SHORT_STATUS: Record<string, string> = {
+  favorable: "Entry looks favorable",
+  almost_ready: "Almost ready — keep watching",
+  wait_for_pullback: "Wait for a lower price",
+  avoid: "Avoid this entry for now",
+  data_unavailable: "Waiting for intraday data",
+};
 
-// Real-time, intraday Entry Quality shown ON EACH CARD alongside Setup Strength
-// so the user can tell a strong *name* from a good *moment* to enter. When there
-// is no intraday feed the score is honestly "—" (insufficient_data), never a
-// fabricated number.
-function EntryQualityRow({ eq }: { eq: EntryQualityScore | null }) {
-  const available = eq != null && eq.status === "available" && eq.score !== null;
+const STATUS_DOT: Record<string, string> = {
+  favorable: "bg-status-good",
+  almost_ready: "bg-status-warning",
+  wait_for_pullback: "bg-status-neutral",
+  avoid: "bg-status-critical",
+  data_unavailable: "bg-ink-muted",
+};
+
+function EntryStatusLine({ symbol, seed }: { symbol: string; seed: EntryQualityScore | null }) {
+  const live = useLiveEntryCheck(symbol, true);
+  const ec = (live.data ?? seed ?? undefined)?.entry_check ?? null;
+  const status = ec?.system_status ?? "data_unavailable";
+  const text = SHORT_STATUS[status] ?? "Waiting for intraday data";
   return (
-    <div className="mt-2.5 flex items-center justify-between rounded-xl border border-border bg-surface-2/60 px-3 py-2">
-      <div>
-        <div className="text-[9.5px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
-          Entry Quality
-        </div>
-        <div
-          className={`text-[11px] font-semibold ${
-            available ? entryTone(eq!.rating) : "text-ink-muted"
-          }`}
-        >
-          {available ? eq!.rating : "Awaiting intraday data"}
-        </div>
-      </div>
-      <div className="text-right">
-        {available ? (
-          <div className={`font-mono text-[18px] font-bold ${entryTone(eq!.rating)}`}>
-            {eq!.score}
-            <span className="text-[11px] font-normal text-ink-muted"> / 100</span>
-          </div>
-        ) : (
-          <div className="font-mono text-[18px] font-bold text-ink-muted">
-            —<span className="text-[11px] font-normal"> / 100</span>
-          </div>
-        )}
-        <div className="text-[9.5px] text-ink-muted">Intraday · real-time</div>
-      </div>
+    <div className="mt-3 flex h-5 items-center gap-2 overflow-hidden text-[12px]">
+      <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[status] ?? "bg-ink-muted"}`} />
+      <span className="shrink-0 text-ink-muted">Entry:</span>
+      <span className="truncate text-ink-secondary">{text}</span>
     </div>
   );
 }
@@ -81,18 +70,26 @@ function CandidateCard({
   c,
   livePrice,
   onTrade,
+  onEntryCheck,
   onAnalyze,
 }: {
   c: OpportunityScore;
   livePrice: number | null;
   onTrade: () => void;
+  onEntryCheck: () => void;
   onAnalyze: () => void;
 }) {
   return (
     <div className="cq-glass flex flex-col rounded-[18px] p-[18px]">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <div className="text-[18px] font-bold tracking-tight text-ink-primary">{c.symbol}</div>
+          <button
+            onClick={onAnalyze}
+            title={`Open analysis for ${c.symbol}`}
+            className="text-[18px] font-bold tracking-tight text-ink-primary transition-colors hover:text-brand-blue"
+          >
+            {c.symbol}
+          </button>
           <div className="mt-px font-mono text-[12.5px] text-ink-secondary">
             {livePrice != null ? (
               <>
@@ -116,8 +113,6 @@ function CandidateCard({
         </div>
       </div>
 
-      <EntryQualityRow eq={c.entry_quality} />
-
       <div className="mt-3 space-y-1">
         {c.factors.map((f) => (
           <div key={f.name} className="flex items-center gap-2 text-[11px]">
@@ -139,12 +134,15 @@ function CandidateCard({
         Rule-based · {c.factor_coverage} · data {c.freshness}
       </div>
 
-      <div className="mt-4 flex gap-2">
+      {/* Compact, plain-language Entry status — refreshes every 15s. */}
+      <EntryStatusLine symbol={c.symbol} seed={c.entry_quality} />
+
+      <div className="mt-3 flex gap-2">
         <button
-          onClick={onAnalyze}
+          onClick={onEntryCheck}
           className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-brand-blue px-3.5 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-brand-blue/90"
         >
-          Analysis
+          Entry Check
         </button>
         <button
           onClick={onTrade}
@@ -166,6 +164,8 @@ export default function TradeCenterPage({
   const [note, setNote] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // The symbol whose Entry Check pop-out is open (null = closed).
+  const [entryCheckSymbol, setEntryCheckSymbol] = useState<string | null>(null);
 
   // The backend serves the scan from a warm cache and returns a fast "warming
   // up" placeholder (empty candidates + a warming note) when it's cold, rather
@@ -238,12 +238,11 @@ export default function TradeCenterPage({
           </h1>
           <p className="mt-1 max-w-[64ch] text-[14.5px] text-ink-secondary">
             The top candidates from a universe scan, ranked by the Rule-Based Opportunity Score
-            (Setup Strength). Each card also shows an independent, real-time{" "}
-            <span className="text-ink-primary">Entry Quality</span> score — Setup Strength asks
-            "is this a strong <em>stock</em>?"; Entry Quality asks "is this a good{" "}
-            <em>moment</em> to enter?", so a strong name can still be a poor entry when extended.
-            Technical only — not a probability of profit, not an AI/ML prediction, and not a
-            buy/sell instruction.
+            (Setup Strength). Each card shows a live <span className="text-ink-primary">Entry</span>{" "}
+            status — open <span className="text-ink-primary">Entry Check</span> for a plain-language
+            read on whether now is a good moment to enter, refreshed every 15 seconds. A strong name
+            can still be a poor entry when it's extended. Technical only — not a probability of
+            profit, not an AI/ML prediction, and not a buy/sell instruction.
           </p>
         </div>
       </div>
@@ -277,12 +276,26 @@ export default function TradeCenterPage({
                 c={c}
                 livePrice={prices[c.symbol.toUpperCase()] ?? null}
                 onTrade={() => onTrade(c.symbol)}
+                onEntryCheck={() => setEntryCheckSymbol(c.symbol)}
                 onAnalyze={() => onViewAnalysis(c.symbol)}
               />
             ))}
           </div>
         )}
       </div>
+
+      {entryCheckSymbol && (
+        <EntryCheckModal
+          symbol={entryCheckSymbol}
+          seed={candidates?.find((c) => c.symbol === entryCheckSymbol)?.entry_quality ?? null}
+          onClose={() => setEntryCheckSymbol(null)}
+          onReviewTrade={() => {
+            const sym = entryCheckSymbol;
+            setEntryCheckSymbol(null);
+            onTrade(sym);
+          }}
+        />
+      )}
     </div>
   );
 }
