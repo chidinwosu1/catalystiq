@@ -111,6 +111,120 @@ paper-order submission disabled and live trading unavailable.
 
 ---
 
+## Running the ML training dry-run (one-off)
+
+The ML subsystem ships **disabled**. To check whether the wired point-in-time
+features + available history are sufficient to train (a *dry run* — it fits
+only **candidate** models, never approves or serves anything), run the offline
+runner. It reads/writes the app's own validated Silver.
+
+**Provider & credentials.** `--ingest` uses **Yahoo Finance (`yfinance`)** —
+the only provider `get_market_data_provider()` returns. It needs **no API key
+and no credentials**, only outbound network access to Yahoo. The single env var
+that matters is **`DATABASE_URL`** (already set on the `catalystiq-api`
+service). `numpy`/`scikit-learn` are in `requirements.txt`, so fitting works in
+the deployed image.
+
+**Keep production disabled.** Do **not** set `ENABLE_ML*` in the service
+environment. The runner turns training on for *its own process only* via a
+CLI flag (`--enable` / `--enable-training`); this never persists and never
+enables inference, serving, or approval.
+
+Two runners are available:
+
+```bash
+# Lightweight sufficiency check (prints a DryRunReport JSON; exits non-zero
+# if the data is not yet sufficient):
+python -m catalystiq.ml.dry_run_cli \
+  --symbols AAPL,MSFT,NVDA,JPM,XOM --benchmark SPY \
+  --start 2020-01-01 --end 2021-06-30 --horizon 5 --enable --ingest
+
+# Fuller runner with MLflow experiment tracking + candidate registration:
+python -m catalystiq.ml.train_cli \
+  --symbols AAPL,MSFT,NVDA,JPM,XOM --benchmark SPY \
+  --start 2020-01-01 --end 2021-06-30 --horizons 1,5,20 \
+  --enable-training --ingest --register-candidates
+```
+
+### Step 0 — verify Yahoo is reachable from Render (run this FIRST)
+
+Yahoo access depends on your Render network egress, which cannot be verified
+from the build environment (this repo's CI/build sandbox blocks Yahoo by
+policy). **Confirm it on Render before the real run** by running this tiny
+check as its own one-off Job (or the first line in a Shell). It exercises the
+exact provider `--ingest` uses:
+
+```bash
+python -c "import datetime as dt, sys; from catalystiq.providers.market_data import get_market_data_provider; \
+b = get_market_data_provider().get_ohlcv('AAPL', dt.date.today() - dt.timedelta(days=10)); \
+print('Yahoo reachable:', len(b), 'AAPL bars'); sys.exit(0 if b else 1)"
+```
+
+If it prints bars and exits 0, proceed. If it errors or exits 1, Yahoo egress
+is blocked on your Render setup — **stop and fix networking first**; do not
+treat the pipeline as working.
+
+### Where to run it (pick by plan)
+
+- **Any box with the repo + Yahoo access, pointing at the Render Postgres
+  (works on the free plan).** Render's free tier has **no Shell and no Jobs**,
+  so run it locally/in CI and point at the DB with `--database-url "<Render
+  EXTERNAL Postgres URL>"` (or omit it and use a throwaway local sqlite via
+  `--database-url sqlite:///./ml_dryrun.db` if you don't want to write Silver
+  into prod). This is also the easiest way to keep the MLflow results (see
+  persistence below).
+- **Render Shell** on `catalystiq-api` (paid instance types): open the Shell
+  tab and run the command as-is — it inherits `DATABASE_URL`, the deps, and
+  Yahoo egress.
+- **Render one-off Job** (paid) — click-by-click:
+  1. Render Dashboard → open the **`catalystiq-api`** service.
+  2. Open the **Jobs** tab (Render → service → **Jobs**; paid instance types
+     only — the free plan has no Jobs).
+  3. Click **Run Job** (a.k.a. "New Job" / "Run a one-off Job").
+  4. In **Command**, paste one command from below **verbatim**. Leave
+     everything else at the service defaults — the Job runs a fresh instance of
+     the **same image** with the **same environment**, so `DATABASE_URL`, the
+     installed deps, and outbound egress all match the running API.
+  5. Click **Run**. Watch the Job's **Logs** for the JSON report; it exits
+     non-zero if the data is not yet sufficient.
+
+  (Exact button labels track Render UI revisions — see the Render "Jobs" docs.
+  A Job is a run of the existing service, **not** a `render.yaml` resource. A
+  recurring cron job or an admin HTTP endpoint would both be the wrong tool
+  here — do not add either.)
+
+### Where results & MLflow artifacts persist after the Job ends
+
+A Render Job's filesystem is **ephemeral** — it is destroyed when the Job
+finishes. Plan for that:
+
+- **Durable — Postgres (`DATABASE_URL`):**
+  - Ingested **Silver bars** (`--ingest`) persist as normal app data.
+  - **Candidate registry rows** (`--register-candidates`) are written to
+    `ml_model_artifact` as `candidate` (never approved; synthetic runs are
+    flagged and can never be promoted). These persist.
+- **Durable-ish — Render logs:** the **JSON report** printed to stdout
+  (DryRunReport / experiment report) lands in the Job's **Logs** (kept per
+  Render's log-retention). Copy it out if you want to keep it.
+- **Ephemeral — LOST when the Job ends (by default):** the **MLflow runs and
+  artifacts** (metrics, calibration/ROC/PR/coverage plots, JSON artifacts).
+  With `MLFLOW_TRACKING_URI` unset, `train_cli` logs to a local `./mlruns`
+  directory (and the `--output-dir` fallback) on the Job's disk, which is
+  discarded. To keep them, set **`MLFLOW_TRACKING_URI`** (in the service/Job
+  env) to a **remote MLflow tracking server backed by a durable artifact store**
+  (e.g. a Postgres backend + S3/GCS artifacts). Render one-off Jobs have no
+  persistent disk, so treat local `mlruns/` as throwaway.
+  - Simplest way to actually browse the MLflow UI/plots: run `train_cli`
+    **locally** (the first option above) where `./mlruns` persists, then
+    `mlflow ui --port 5000`.
+
+**Sizing.** Feature extraction is ~1s/example (heavy analysis snapshots). Five
+symbols over ~18 months weekly is ~400 examples ≈ 7–8 min CPU plus model
+fitting — tight on a free 512 MB instance. Start with **3–5 symbols and a
+shorter range** (or a larger `--step-days`) and scale up.
+
+---
+
 ## Caveats
 
 - **Cross-site cookies.** Two separate `onrender.com` subdomains are
