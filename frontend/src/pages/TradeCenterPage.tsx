@@ -83,13 +83,7 @@ function CandidateCard({
     <div className="cq-glass flex flex-col rounded-[18px] p-[18px]">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <button
-            onClick={onAnalyze}
-            title={`Open analysis for ${c.symbol}`}
-            className="text-[18px] font-bold tracking-tight text-ink-primary transition-colors hover:text-brand-blue"
-          >
-            {c.symbol}
-          </button>
+          <div className="text-[18px] font-bold tracking-tight text-ink-primary">{c.symbol}</div>
           <div className="mt-px font-mono text-[12.5px] text-ink-secondary">
             {livePrice != null ? (
               <>
@@ -130,8 +124,14 @@ function CandidateCard({
         ))}
       </div>
 
-      <div className="mt-2 text-[10.5px] text-ink-muted">
-        Rule-based · {c.factor_coverage} · data {c.freshness}
+      <div className="mt-2 flex items-center justify-between gap-2 text-[10.5px] text-ink-muted">
+        <span>Rule-based · {c.factor_coverage} · data {c.freshness}</span>
+        <button
+          onClick={onAnalyze}
+          className="shrink-0 font-semibold text-brand-blue transition-colors hover:text-ink-primary"
+        >
+          Analysis →
+        </button>
       </div>
 
       {/* Compact, plain-language Entry status — refreshes every 15s. */}
