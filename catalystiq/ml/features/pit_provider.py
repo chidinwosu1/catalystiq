@@ -353,15 +353,22 @@ def _compute_snapshots(symbol, bars, prediction_timestamp, benchmark_symbol, sec
     from catalystiq.analysis.risk import compute_risk_snapshot
     from catalystiq.analysis.volume_liquidity import compute_volume_liquidity_snapshot
 
-    s = _Snapshots()
-    s.tech = compute_technical_snapshot(symbol, bars)
-    s.risk = compute_risk_snapshot(symbol, bars)
-    s.vol = compute_volume_liquidity_snapshot(symbol, bars)
-    s.struct = compute_market_structure_snapshot(symbol, bars)
-
+    # Benchmark/sector bars are loaded FIRST so beta / correlation vs the
+    # benchmark can be computed in the risk snapshot. bars_asof() already
+    # truncates the benchmark series to the last closed session at/before the
+    # prediction timestamp, so passing it here uses only point-in-time data
+    # (no look-ahead).
     market_bars = bars_asof(benchmark_symbol, prediction_timestamp) if benchmark_symbol else []
     sector_symbol = sector_resolver(symbol) if sector_resolver else None
     sector_bars = bars_asof(sector_symbol, prediction_timestamp) if sector_symbol else []
+
+    s = _Snapshots()
+    s.tech = compute_technical_snapshot(symbol, bars)
+    s.risk = compute_risk_snapshot(
+        symbol, bars, benchmark_bars=market_bars or None, benchmark_symbol=benchmark_symbol,
+    )
+    s.vol = compute_volume_liquidity_snapshot(symbol, bars)
+    s.struct = compute_market_structure_snapshot(symbol, bars)
 
     s.ctx = compute_market_context_snapshot(
         symbol, bars, market_bars=market_bars or None, market_symbol=benchmark_symbol,

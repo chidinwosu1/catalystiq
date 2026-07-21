@@ -164,3 +164,28 @@ def test_support_resistance_missing_when_no_active_level():
     struct = SimpleNamespace(support_resistance_levels=[])
     ds, dr = _support_resistance_distances(struct, 100.0)
     assert ds is None and dr is None
+
+
+def test_beta_60d_populated_point_in_time_without_leakage():
+    """beta_60d must be computed from the point-in-time BENCHMARK bars (was a
+    dead/always-missing feature before the risk snapshot received the
+    benchmark), and it must be look-ahead invariant."""
+    short = {"AAA": _series(n=400), "SPY": _series(seed=4.0, n=400)}
+    longer = {"AAA": _series(n=520), "SPY": _series(seed=4.0, n=520)}
+
+    a = {f.feature_name: f for f in _provider(short).get_features("AAA", PT)}
+    beta = a["beta_60d"]
+    assert beta.feature_value is not None
+    assert beta.data_quality_status is DataQualityStatus.OK
+    assert beta.available_at_timestamp <= beta.prediction_timestamp  # provenance
+
+    # Appending FUTURE benchmark bars must not change the as-of beta value.
+    b = {f.feature_name: f for f in _provider(longer).get_features("AAA", PT)}
+    assert abs(a["beta_60d"].feature_value - b["beta_60d"].feature_value) < 1e-9
+
+    # And with NO benchmark bars it correctly falls back to missing (fail closed,
+    # never fabricated).
+    no_bench = {"AAA": _series(n=400)}  # no SPY
+    c = {f.feature_name: f for f in _provider(no_bench).get_features("AAA", PT)}
+    assert c["beta_60d"].feature_value is None
+    assert c["beta_60d"].data_quality_status is DataQualityStatus.MISSING
