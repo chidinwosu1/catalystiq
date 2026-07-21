@@ -681,15 +681,25 @@ def _insufficient_score(symbol: str, now: dt.datetime, reason: str) -> EntryQual
     )
 
 
+def _gated(provider, label: str, fn):
+    """Run a provider call through the shared per-provider MarketDataGate
+    (concurrency limit + rate-limit circuit-breaker), so the intraday Entry
+    Check feed never fans out unbounded against a throttled endpoint - the same
+    protection every other market-data call in this codebase already uses."""
+    from catalystiq.providers.market_data_gate import get_gate_for
+
+    return get_gate_for(provider).run(label, fn)
+
+
 def _best_effort_quote(provider, symbol: str) -> float | None:
     """A 15s-fresh current price for the verdict layer. Best-effort only: any
     failure (no live feed) returns None and the score falls back to the last
-    completed close - never a fabricated price."""
+    completed close - never a fabricated price. Routed through the gate."""
     getq = getattr(provider, "get_quote", None)
     if not callable(getq):
         return None
     try:
-        return float(getq(symbol).price)
+        return float(_gated(provider, f"entry-quote {symbol}", lambda: getq(symbol)).price)
     except Exception:
         return None
 
@@ -709,7 +719,10 @@ def score_entry_quality(
     ``insufficient_data`` score (never a fabricated number), exactly like the
     Setup Strength engine degrades on missing inputs. Never raises for a data
     problem - the caller can always attach the returned score. ``setup_is_strong``
-    (the daily Setup Strength band) feeds the plain-language Entry Check checklist."""
+    (the daily Setup Strength band) feeds the plain-language Entry Check checklist.
+
+    The intraday fetch and the quote are routed through the shared MarketDataGate
+    so 15s polling across cards can't hammer a throttled provider."""
     symbol = symbol.upper()
     fetch = getattr(provider, "get_intraday_ohlcv", None)
     if not callable(fetch):
@@ -717,7 +730,10 @@ def score_entry_quality(
             symbol, now, "Intraday data is not available from the current provider."
         )
     try:
-        bars = fetch(symbol, interval=_INTRADAY_INTERVAL, days=_INTRADAY_DAYS)
+        bars = _gated(
+            provider, f"entry-intraday {symbol}",
+            lambda: fetch(symbol, interval=_INTRADAY_INTERVAL, days=_INTRADAY_DAYS),
+        )
     except Exception:
         return _insufficient_score(
             symbol, now, "Intraday data could not be fetched for this symbol."
@@ -730,3 +746,85 @@ def score_entry_quality(
         symbol, bars, now=now, interval=_INTRADAY_INTERVAL, prev_day_high=prev_day_high,
         latest_price=_best_effort_quote(provider, symbol), setup_is_strong=setup_is_strong,
     )
+
+
+# --- Short-TTL per-symbol cache ---------------------------------------------
+# The 15s UI poll for a symbol is already deduped client-side, but multiple tabs
+# / users / the scan can request the same symbol at once. This tiny cache
+# coalesces those into one compute within a short window; a fresh compute still
+# happens roughly every `ttl` seconds. Never serves across symbols and never
+# stores a fabricated result.
+
+import threading as _threading  # noqa: E402
+import time as _time  # noqa: E402
+from dataclasses import dataclass as _dataclass  # noqa: E402
+
+
+@_dataclass
+class _EntryCacheEntry:
+    score: EntryQualityScore
+    stored_at: float
+
+
+_ENTRY_CACHE: dict[tuple, _EntryCacheEntry] = {}
+_ENTRY_CACHE_LOCK = _threading.Lock()
+
+
+def clear_entry_quality_cache() -> None:
+    """Drop cached Entry Check results. Test-support only."""
+    with _ENTRY_CACHE_LOCK:
+        _ENTRY_CACHE.clear()
+
+
+def score_entry_quality_cached(
+    symbol: str,
+    provider,
+    now: dt.datetime,
+    *,
+    setup_is_strong: bool | None = None,
+    ttl_seconds: float | None = None,
+    monotonic=_time.monotonic,
+) -> EntryQualityScore:
+    """`score_entry_quality` with a short-TTL result cache keyed by
+    (symbol, provider). Within the TTL a repeat request returns the cached score
+    instead of re-fetching from the provider - so 15s polling across cards / tabs
+    coalesces into one provider round-trip per window."""
+    if ttl_seconds is None:
+        from catalystiq.config import get_settings
+
+        ttl_seconds = get_settings().entry_check_cache_ttl_seconds
+
+    symbol = symbol.upper()
+    key = (symbol, getattr(provider, "PROVIDER_NAME", type(provider).__name__))
+
+    if ttl_seconds > 0:
+        with _ENTRY_CACHE_LOCK:
+            entry = _ENTRY_CACHE.get(key)
+            if entry is not None and (monotonic() - entry.stored_at) < ttl_seconds:
+                return entry.score
+
+    score = score_entry_quality(symbol, provider, now, setup_is_strong=setup_is_strong)
+    if ttl_seconds > 0:
+        with _ENTRY_CACHE_LOCK:
+            _ENTRY_CACHE[key] = _EntryCacheEntry(score=score, stored_at=monotonic())
+    return score
+
+
+def resolve_entry_quality(
+    symbol: str, now: dt.datetime, *, setup_is_strong: bool | None = None
+) -> EntryQualityScore:
+    """Resolve the DEDICATED intraday provider (Webull real-time when configured,
+    else Yahoo) and score, cached. Fully defensive: if the provider can't even be
+    constructed, returns an ``insufficient_data`` score instead of raising, so a
+    provider/credential problem degrades Entry Check to "Cannot Evaluate Right
+    Now" rather than 500-ing the endpoint. This is the single entry point the
+    router and scan use."""
+    from catalystiq.providers.market_data import get_intraday_market_data_provider
+
+    try:
+        provider = get_intraday_market_data_provider()
+    except Exception:
+        return _insufficient_score(
+            symbol, now, "Intraday market-data provider is unavailable."
+        )
+    return score_entry_quality_cached(symbol, provider, now, setup_is_strong=setup_is_strong)

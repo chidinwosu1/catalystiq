@@ -1,6 +1,6 @@
 fastapi
 uvicorn[standard]
-webull-openapi-python-sdk
+webull-openapi-python-sdk  # trade client (webull.trade) + market-data client (webull.data) for the real-time Entry Check feed
 alpaca-py  # disabled legacy adapter only - see catalystiq/providers/broker.py
 pydantic
 pydantic-settings

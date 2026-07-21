@@ -101,6 +101,23 @@ class Settings(BaseSettings):
     # settings below are the forward-looking source-priority controls (§16).
     market_data_provider: str = "yahoo"
 
+    # --- Intraday (Entry Check) market-data source -------------------------
+    # The real-time Entry Quality / Entry Check feed is served by a DEDICATED
+    # provider, independent of the daily-history provider above so the daily
+    # pipeline, fundamentals and news stay on Yahoo unchanged. Yahoo intraday is
+    # ~15-min delayed and rate-limited; set this to "webull" to use Webull's
+    # OpenAPI Market Data (real-time L1 US quotes + 1m/5m bars) via the existing
+    # Webull app credentials. "yahoo" (default) reuses the Yahoo provider.
+    intraday_market_data_provider: str = "yahoo"  # "yahoo" | "webull"
+    # Bare host the Webull market-data SDK signs/sends against (no scheme/path),
+    # analogous to webull_api_base_url for trading. Webull uses distinct market-
+    # data hosts; leave blank to use the SDK's default endpoint for the region.
+    webull_mdata_api_base_url: str = ""
+    # Short TTL (seconds) for the per-symbol Entry Check result cache. Coalesces
+    # concurrent duplicate requests (multiple tabs/users) within the window; the
+    # 15s UI poll still gets a fresh compute once the window lapses. 0 disables.
+    entry_check_cache_ttl_seconds: int = 10
+
     # --- Data-source integration (spec §2) ---------------------------
     # Source priority for market data. Yahoo stays the initial primary
     # historical source; Twelve Data is the optional secondary/validation

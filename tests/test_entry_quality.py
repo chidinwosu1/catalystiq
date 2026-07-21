@@ -357,9 +357,13 @@ def _rising(n, base, trend, amp):
     return [base + trend * i + amp * math.sin(i / 5.0) for i in range(n)]
 
 
-def test_scan_attaches_independent_entry_quality_to_each_candidate(client, test_db_session):
+def test_scan_attaches_independent_entry_quality_to_each_candidate(
+    client, test_db_session, monkeypatch
+):
     """Each Setup Strength candidate carries its own Entry Quality block - the
     two scores are independent and travel together (one per card)."""
+    import catalystiq.providers.market_data as market_data
+    from catalystiq.analysis.entry_quality import clear_entry_quality_cache
     from catalystiq.analysis.opportunity_score import clear_scan_cache
     from catalystiq.main import app
     from catalystiq.providers.market_data import get_market_data_provider
@@ -369,6 +373,8 @@ def test_scan_attaches_independent_entry_quality_to_each_candidate(client, test_
     today = dt.date.today()
 
     class _FakeProvider:
+        PROVIDER_NAME = "fake_scan_intraday"
+
         def get_ohlcv(self, symbol, start, end=None, interval="1d"):
             return _daily_bars(_bizdays_ending(today, 300), _rising(300, 100, 0.25, 4))
 
@@ -386,13 +392,19 @@ def test_scan_attaches_independent_entry_quality_to_each_candidate(client, test_
         def get_news(self, symbol, limit=10):
             return []
 
+    provider = _FakeProvider()
     clear_scan_cache()
-    app.dependency_overrides[get_market_data_provider] = lambda: _FakeProvider()
+    clear_entry_quality_cache()
+    # The Entry Check feed uses the DEDICATED intraday provider factory, not the
+    # daily scan provider - point both at the fake so the test is hermetic.
+    app.dependency_overrides[get_market_data_provider] = lambda: provider
+    monkeypatch.setattr(market_data, "get_intraday_market_data_provider", lambda: provider)
     try:
         r = client.get("/analysis/opportunity-scan", params={"top": 2, "symbols": "NVDA,AAPL"})
     finally:
         del app.dependency_overrides[get_market_data_provider]
         clear_scan_cache()
+        clear_entry_quality_cache()
 
     assert r.status_code == 200
     candidates = r.json()["candidates"]
@@ -409,7 +421,11 @@ def test_scan_attaches_independent_entry_quality_to_each_candidate(client, test_
         assert c["formula_version"] == "opportunity_score_v1"
 
 
-def test_scan_entry_quality_degrades_when_provider_lacks_intraday(client, test_db_session):
+def test_scan_entry_quality_degrades_when_provider_lacks_intraday(
+    client, test_db_session, monkeypatch
+):
+    import catalystiq.providers.market_data as market_data
+    from catalystiq.analysis.entry_quality import clear_entry_quality_cache
     from catalystiq.analysis.opportunity_score import clear_scan_cache
     from catalystiq.main import app
     from catalystiq.providers.market_data import get_market_data_provider
@@ -418,6 +434,8 @@ def test_scan_entry_quality_degrades_when_provider_lacks_intraday(client, test_d
     today = dt.date.today()
 
     class _NoIntraday:
+        PROVIDER_NAME = "fake_no_intraday"
+
         def get_ohlcv(self, symbol, start, end=None, interval="1d"):
             return _daily_bars(_bizdays_ending(today, 300), _rising(300, 100, 0.25, 4))
 
@@ -432,13 +450,17 @@ def test_scan_entry_quality_degrades_when_provider_lacks_intraday(client, test_d
         def get_news(self, symbol, limit=10):
             return []
 
+    provider = _NoIntraday()
     clear_scan_cache()
-    app.dependency_overrides[get_market_data_provider] = lambda: _NoIntraday()
+    clear_entry_quality_cache()
+    app.dependency_overrides[get_market_data_provider] = lambda: provider
+    monkeypatch.setattr(market_data, "get_intraday_market_data_provider", lambda: provider)
     try:
         r = client.get("/analysis/opportunity-scan", params={"top": 1, "symbols": "NVDA"})
     finally:
         del app.dependency_overrides[get_market_data_provider]
         clear_scan_cache()
+        clear_entry_quality_cache()
 
     assert r.status_code == 200
     candidates = r.json()["candidates"]

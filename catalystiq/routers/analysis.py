@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from catalystiq.analysis.market_context import SECTOR_ETF_MAP
-from catalystiq.analysis.entry_quality import score_entry_quality
+from catalystiq.analysis.entry_quality import resolve_entry_quality
 from catalystiq.analysis.opportunity_score import (
     scan_universe_cached,
     scan_universe_fast,
@@ -125,24 +125,24 @@ def get_opportunity_score(
         score = score_symbol(symbol, provider, db, now=now)
     except MarketDataError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    # Attach the INDEPENDENT real-time Entry Quality Score (best-effort; degrades
-    # to insufficient_data when no intraday feed is available).
-    eq = score_entry_quality(symbol, provider, now)
+    # Attach the INDEPENDENT real-time Entry Quality Score from the DEDICATED
+    # intraday provider (Webull real-time when configured, else Yahoo) - best-
+    # effort; degrades to insufficient_data when no intraday feed is available.
+    setup_is_strong = score.label in ("Strong setup", "Favorable setup")
+    eq = resolve_entry_quality(symbol, now, setup_is_strong=setup_is_strong)
     return score.model_copy(update={"entry_quality": eq})
 
 
 @router.get("/{symbol}/entry-quality", response_model=EntryQualityScore)
-def get_entry_quality_score(
-    symbol: str,
-    provider: MarketDataProvider = Depends(get_market_data_provider),
-    db: Session = Depends(get_db),
-):
+def get_entry_quality_score(symbol: str):
     """Dynamic Entry Quality Score (0-100) - a real-time, intraday read of
     whether the *current moment* is an attractive entry, INDEPENDENT of the
-    daily Setup Strength. Returns status "insufficient_data" (never a guessed
-    number) when intraday inputs are missing, stale, or the provider has no
-    intraday feed."""
-    return score_entry_quality(symbol, provider, dt.datetime.now(dt.timezone.utc))
+    daily Setup Strength. Served from the DEDICATED intraday provider (Webull
+    real-time when configured, else Yahoo). Returns status "insufficient_data"
+    (never a guessed number) when intraday inputs are missing, stale, or the
+    provider has no intraday feed. This is the endpoint the Trade Center cards
+    and Entry Check pop-out poll every 15 seconds."""
+    return resolve_entry_quality(symbol, dt.datetime.now(dt.timezone.utc))
 
 
 @router.get("/{symbol}/market-structure", response_model=MarketStructureSnapshot)

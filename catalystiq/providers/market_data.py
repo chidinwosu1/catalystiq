@@ -247,3 +247,65 @@ def get_market_data_provider() -> MarketDataProvider:
     if provider_name == "yahoo":
         return YahooFinanceProvider()
     raise ValueError(f"Unknown market data provider: {provider_name}")
+
+
+# --- Dedicated intraday (Entry Check) provider ------------------------------
+# The real-time Entry Quality / Entry Check feed uses its OWN provider so the
+# daily pipeline, fundamentals and news stay on Yahoo. Webull's OpenAPI Market
+# Data serves real-time L1 US quotes + 1m/5m bars; Yahoo (default) reuses the
+# daily provider. The Webull client is expensive to build (signed SDK client),
+# so instances are cached per credential set; construction failures are NOT
+# cached (a missing-credential error surfaces on every request).
+
+import threading as _threading  # noqa: E402
+
+_intraday_provider_cache: dict[tuple, MarketDataProvider] = {}
+_intraday_provider_lock = _threading.Lock()
+
+
+def reset_intraday_provider_cache() -> None:
+    """Drop any cached intraday provider. Test-support / config-reload hook."""
+    with _intraday_provider_lock:
+        _intraday_provider_cache.clear()
+
+
+def get_intraday_market_data_provider() -> MarketDataProvider:
+    """The provider that serves the real-time Entry Check feed, chosen by
+    ``intraday_market_data_provider``. Defaults to (and falls back to) the Yahoo
+    daily provider; ``"webull"`` uses Webull OpenAPI Market Data via the existing
+    Webull app credentials. Never raises for an unknown value - it degrades to
+    the default provider, so Entry Check keeps working (delayed) rather than
+    500-ing."""
+    from catalystiq.config import get_settings
+
+    settings = get_settings()
+    choice = (settings.intraday_market_data_provider or "yahoo").strip().lower()
+
+    if choice == "webull":
+        key = (
+            "webull",
+            settings.webull_app_key,
+            settings.webull_app_secret,
+            settings.webull_region_id,
+            settings.webull_mdata_api_base_url,
+        )
+        cached = _intraday_provider_cache.get(key)
+        if cached is not None:
+            return cached
+        with _intraday_provider_lock:
+            cached = _intraday_provider_cache.get(key)
+            if cached is not None:
+                return cached
+            from catalystiq.providers.webull_market_data import WebullMarketDataProvider
+
+            provider = WebullMarketDataProvider(
+                settings.webull_app_key,
+                settings.webull_app_secret,
+                region_id=settings.webull_region_id,
+                api_endpoint=settings.webull_mdata_api_base_url,
+            )
+            _intraday_provider_cache[key] = provider
+            return provider
+
+    # Default / "yahoo" / any unknown value: reuse the daily provider.
+    return get_market_data_provider()
