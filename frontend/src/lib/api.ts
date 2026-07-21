@@ -449,6 +449,38 @@ export interface OpportunityUnavailableFactor {
   reason: string;
 }
 
+export interface EntryQualityComponent {
+  name: string;
+  score: number | null;
+  max_score: number;
+  status: "available" | "insufficient_data";
+  inputs: Record<string, unknown>;
+  explanation: string;
+  formula_version: string;
+}
+
+/**
+ * The real-time, intraday Entry Quality Score - INDEPENDENT of the daily Setup
+ * Strength (OpportunityScore). Answers "is this a high-quality MOMENT to
+ * enter?" vs Setup Strength's "is this a high-quality STOCK to trade?".
+ */
+export interface EntryQualityScore {
+  symbol: string;
+  status: "available" | "insufficient_data";
+  score_type: string; // "entry_quality"
+  score: number | null;
+  max_score: number;
+  rating: string | null; // "Excellent Entry" .. "Poor Entry"
+  formula_version: string;
+  calculated_at: string;
+  data_as_of: string | null;
+  interval: string | null;
+  component_coverage: string;
+  components: EntryQualityComponent[];
+  warnings: string[];
+  reason: string | null;
+}
+
 export interface OpportunityScore {
   symbol: string;
   status: "available" | "insufficient_data";
@@ -466,6 +498,12 @@ export interface OpportunityScore {
   warnings: string[];
   ml: { status: string; reason: string };
   reason: string | null;
+  /** Independent real-time Entry Quality; null when not computed. */
+  entry_quality: EntryQualityScore | null;
+}
+
+export function getEntryQualityScore(symbol: string): Promise<EntryQualityScore> {
+  return request(`/analysis/${encodeURIComponent(symbol)}/entry-quality`);
 }
 
 export function getOpportunityScore(symbol: string): Promise<OpportunityScore> {

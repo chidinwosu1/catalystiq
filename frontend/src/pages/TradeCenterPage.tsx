@@ -5,6 +5,7 @@ import {
   ApiError,
   getOpportunityScan,
   getOpportunityScanShared,
+  type EntryQualityScore,
   type OpportunityScan,
   type OpportunityScore,
 } from "../lib/api";
@@ -29,6 +30,51 @@ function bandTone(label: string | null): string {
   if (label === "Strong setup" || label === "Favorable setup") return "text-status-good";
   if (label === "Weak setup" || label === "Unfavorable setup") return "text-status-critical";
   return "text-ink-primary";
+}
+
+// Entry Quality is INDEPENDENT of Setup Strength: a strong setup can still be a
+// poor entry when it's extended after a large morning move.
+function entryTone(rating: string | null): string {
+  if (rating === "Excellent Entry" || rating === "Good Entry") return "text-status-good";
+  if (rating === "Poor Entry" || rating === "Caution") return "text-status-critical";
+  return "text-ink-primary";
+}
+
+// Real-time, intraday Entry Quality shown ON EACH CARD alongside Setup Strength
+// so the user can tell a strong *name* from a good *moment* to enter. When there
+// is no intraday feed the score is honestly "—" (insufficient_data), never a
+// fabricated number.
+function EntryQualityRow({ eq }: { eq: EntryQualityScore | null }) {
+  const available = eq != null && eq.status === "available" && eq.score !== null;
+  return (
+    <div className="mt-2.5 flex items-center justify-between rounded-xl border border-border bg-surface-2/60 px-3 py-2">
+      <div>
+        <div className="text-[9.5px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
+          Entry Quality
+        </div>
+        <div
+          className={`text-[11px] font-semibold ${
+            available ? entryTone(eq!.rating) : "text-ink-muted"
+          }`}
+        >
+          {available ? eq!.rating : "Awaiting intraday data"}
+        </div>
+      </div>
+      <div className="text-right">
+        {available ? (
+          <div className={`font-mono text-[18px] font-bold ${entryTone(eq!.rating)}`}>
+            {eq!.score}
+            <span className="text-[11px] font-normal text-ink-muted"> / 100</span>
+          </div>
+        ) : (
+          <div className="font-mono text-[18px] font-bold text-ink-muted">
+            —<span className="text-[11px] font-normal"> / 100</span>
+          </div>
+        )}
+        <div className="text-[9.5px] text-ink-muted">Intraday · real-time</div>
+      </div>
+    </div>
+  );
 }
 
 function CandidateCard({
@@ -59,6 +105,9 @@ function CandidateCard({
           </div>
         </div>
         <div className="text-right">
+          <div className="text-[9.5px] font-semibold uppercase tracking-[0.12em] text-ink-muted">
+            Setup Strength
+          </div>
           <div className={`font-mono text-[20px] font-bold ${bandTone(c.label)}`}>
             {c.score}
             <span className="text-[12px] font-normal text-ink-muted"> / 100</span>
@@ -66,6 +115,8 @@ function CandidateCard({
           <div className={`text-[11px] font-semibold ${bandTone(c.label)}`}>{c.label}</div>
         </div>
       </div>
+
+      <EntryQualityRow eq={c.entry_quality} />
 
       <div className="mt-3 space-y-1">
         {c.factors.map((f) => (
@@ -187,8 +238,12 @@ export default function TradeCenterPage({
           </h1>
           <p className="mt-1 max-w-[64ch] text-[14.5px] text-ink-secondary">
             The top candidates from a universe scan, ranked by the Rule-Based Opportunity Score
-            (Setup Strength). Technical setup strength only — not a probability of profit, not an
-            AI/ML prediction, and not a buy/sell instruction.
+            (Setup Strength). Each card also shows an independent, real-time{" "}
+            <span className="text-ink-primary">Entry Quality</span> score — Setup Strength asks
+            "is this a strong <em>stock</em>?"; Entry Quality asks "is this a good{" "}
+            <em>moment</em> to enter?", so a strong name can still be a poor entry when extended.
+            Technical only — not a probability of profit, not an AI/ML prediction, and not a
+            buy/sell instruction.
           </p>
         </div>
       </div>

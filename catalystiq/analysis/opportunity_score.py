@@ -437,6 +437,20 @@ def score_symbol(
     )
 
 
+def _with_entry_quality(score: OpportunityScore, provider, now: dt.datetime) -> OpportunityScore:
+    """Attach the INDEPENDENT real-time Entry Quality Score to a Setup Strength
+    result. Best-effort: any failure (no intraday feed, fetch error) degrades to
+    an ``insufficient_data`` entry-quality block, never dropping the candidate."""
+    from catalystiq.analysis.entry_quality import score_entry_quality
+
+    try:
+        eq = score_entry_quality(score.symbol, provider, now)
+    except Exception:  # pragma: no cover - defensive; entry quality never blocks
+        _logger.exception("entry-quality scoring failed for %s", score.symbol)
+        return score
+    return score.model_copy(update={"entry_quality": eq})
+
+
 def _scoring_max_bars() -> int:
     from catalystiq.config import get_settings
 
@@ -479,7 +493,7 @@ def scan_universe(provider, db, now: dt.datetime, top: int = 4, universe=None) -
             eligible.append(result)
 
     eligible.sort(key=lambda r: (-(r.score or 0), r.symbol))
-    candidates = eligible[:top]
+    candidates = [_with_entry_quality(c, provider, now) for c in eligible[:top]]
     return OpportunityScan(
         as_of=now if now.tzinfo else now.replace(tzinfo=dt.timezone.utc),
         formula_version=FORMULA_VERSION,

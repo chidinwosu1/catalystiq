@@ -13,6 +13,7 @@ from catalystiq.providers.base import DataDomain
 from catalystiq.providers.fetch_tracker import record_fetch
 from catalystiq.schemas.market_data import (
     FundamentalsSnapshot,
+    IntradayBar,
     NewsItem,
     OHLCVBar,
     Quote,
@@ -121,6 +122,53 @@ class YahooFinanceProvider(MarketDataProvider):
             bars.append(
                 OHLCVBar(
                     date=index.date(),
+                    open=float(row["Open"]),
+                    high=float(row["High"]),
+                    low=float(row["Low"]),
+                    close=float(row["Close"]),
+                    volume=int(row["Volume"]),
+                )
+            )
+        return bars
+
+    def get_intraday_ohlcv(
+        self,
+        symbol: str,
+        *,
+        interval: str = "5m",
+        days: int = 20,
+    ) -> list[IntradayBar]:
+        """Timestamped intraday OHLCV for the Entry Quality Score.
+
+        Returns the last ``days`` sessions of ``interval`` bars (default 20
+        sessions of 5-minute bars) so callers get the current session plus a
+        prior-session baseline for relative-volume-by-time-of-day. This is an
+        OPTIONAL provider capability (not on the abstract contract); callers
+        duck-type it and degrade to insufficient_data when a provider lacks it.
+        A fetch failure raises MarketDataError; empty data returns ``[]``."""
+        try:
+            df = self._ticker(symbol).history(
+                period=f"{max(1, days)}d", interval=interval, auto_adjust=False
+            )
+        except Exception as exc:  # pragma: no cover - network/library errors
+            raise MarketDataError(
+                f"Failed to fetch intraday OHLCV for {symbol}: {exc}"
+            ) from exc
+
+        record_fetch(self.PROVIDER_NAME)
+        if df.empty:
+            return []
+
+        bars: list[IntradayBar] = []
+        for index, row in df.iterrows():
+            ts = index.to_pydatetime()
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=dt.timezone.utc)
+            else:
+                ts = ts.astimezone(dt.timezone.utc)
+            bars.append(
+                IntradayBar(
+                    timestamp=ts,
                     open=float(row["Open"]),
                     high=float(row["High"]),
                     low=float(row["Low"]),
