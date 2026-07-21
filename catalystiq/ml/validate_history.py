@@ -51,6 +51,23 @@ from catalystiq.ml.labels.outcomes import generate_outcome_labels
 
 INDICATOR_WARMUP_DAYS = 420
 
+# Surfaced on EVERY report (audit-only and full). A validation run over a
+# hand-picked list of TODAY's tickers is survivorship-biased: names that were
+# delisted, went bankrupt, or were acquired across the requested range are
+# absent, so any positive-label / return statistic is optimistic. This stage
+# validates the point-in-time PIPELINE, not a tradeable edge; drawing
+# performance conclusions requires a true point-in-time, delisting-aware
+# universe (with historical constituents as they existed at each date).
+SURVIVORSHIP_BIAS_WARNING = (
+    "SURVIVORSHIP BIAS: this run uses a fixed list of currently-known symbols. "
+    "Any symbol that was delisted, went bankrupt, or was acquired during the "
+    "requested range is absent, which biases label rates and returns optimistically. "
+    "This validates the point-in-time feature/label PIPELINE only - it is NOT "
+    "evidence of a tradeable model or edge. A defensible study needs a "
+    "point-in-time, delisting-aware universe of the actual historical constituents "
+    "as of each prediction date."
+)
+
 
 def _prediction_dates(start: dt.date, end: dt.date, step_days: int) -> list[dt.datetime]:
     out: list[dt.datetime] = []
@@ -177,6 +194,7 @@ def run_history_validation(
     max_missing_ratio: float = 0.02,
     max_gap_sessions: int = 5,
     audit_only: bool = False,
+    max_feature_bars: int | None = None,
     progress: bool = False,
 ) -> dict:
     """Audit coverage, fail closed if incomplete, else run per-horizon dry-run
@@ -209,12 +227,14 @@ def run_history_validation(
     incomplete = [s for s, c in coverage.items() if not c["complete"]]
     report: dict = {
         "status": "ok",
+        "survivorship_bias_warning": SURVIVORSHIP_BIAS_WARNING,
         "symbols": [s.upper() for s in symbols],
         "benchmark": benchmark.upper(),
         "requested_start": start.isoformat(),
         "requested_end": end.isoformat(),
         "horizons": horizons,
         "step_days": step_days,
+        "max_feature_bars": max_feature_bars,
         "symbol_coverage": coverage,
     }
 
@@ -240,7 +260,10 @@ def run_history_validation(
         return report
 
     # 2) Build features ONCE across horizons, then per-horizon diagnostics.
-    provider = SilverPointInTimeProvider(db, benchmark_symbol=benchmark, sector_resolver=lambda s: None)
+    provider = SilverPointInTimeProvider(
+        db, benchmark_symbol=benchmark, sector_resolver=lambda s: None,
+        max_feature_bars=max_feature_bars,
+    )
     dates = _prediction_dates(start, end, step_days)
     datasets, per_symbol, dated_vectors = _build_multi_horizon(
         provider, symbols, dates, direction, horizons, is_synthetic=is_synthetic_data,
@@ -302,6 +325,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Do NOT fail closed on incomplete coverage (diagnostic only; not recommended).")
     p.add_argument("--max-missing-ratio", type=float, default=0.02)
     p.add_argument("--max-gap-sessions", type=int, default=5)
+    p.add_argument("--max-feature-bars", type=int, default=None,
+                   help="Opt-in feature-window cap (e.g. 500): only the most recent N closed "
+                        "sessions feed the windowed feature snapshots, bounding per-example CPU. "
+                        "EXACT for windowed indicators and convergent (~1e-12) for RSI/MACD/ATR; "
+                        "beta and support/resistance stay identical (computed on full history). "
+                        "Must be >= the longest registered lookback (200); default full history.")
     return p
 
 
@@ -342,7 +371,7 @@ def main(argv: list[str] | None = None, *, db=None) -> int:
             horizons=horizons, step_days=args.step_days, direction=args.direction,
             settings=settings, require_complete_history=not args.allow_incomplete_history,
             max_missing_ratio=args.max_missing_ratio, max_gap_sessions=args.max_gap_sessions,
-            audit_only=args.audit_only, progress=True,
+            audit_only=args.audit_only, max_feature_bars=args.max_feature_bars, progress=True,
         )
     finally:
         if owns_db:

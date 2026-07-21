@@ -130,6 +130,28 @@ def test_audit_only_reports_incomplete_without_model_work(test_db_session, monke
     assert "AAA" in report["incomplete_symbols"]
 
 
+def test_survivorship_warning_present_in_audit_only_and_full_reports(test_db_session):
+    _seed(test_db_session, "AAA", start=dt.date(2019, 1, 1), end=dt.date(2020, 6, 30))
+    _seed(test_db_session, "SPY", start=dt.date(2019, 1, 1), end=dt.date(2020, 6, 30), seed=4.0)
+
+    audit = run_history_validation(
+        test_db_session, symbols=["AAA"], benchmark="SPY",
+        start=dt.date(2020, 1, 6), end=dt.date(2020, 3, 6), horizons=[1, 5],
+        settings=Settings(action_api_key="k"), audit_only=True,
+    )
+    assert "survivorship" in audit["survivorship_bias_warning"].lower()
+
+    full = run_history_validation(
+        test_db_session, symbols=["AAA"], benchmark="SPY",
+        start=dt.date(2020, 1, 6), end=dt.date(2020, 3, 6), horizons=[1, 5],
+        step_days=7, settings=_enabling(), is_synthetic_data=True, max_feature_bars=500,
+    )
+    assert "survivorship" in full["survivorship_bias_warning"].lower()
+    # The applied cap is echoed for reproducibility.
+    assert full["max_feature_bars"] == 500
+    assert full["status"] == "ok"
+
+
 def test_cli_audit_only_exit_codes(test_db_session):
     _seed(test_db_session, "AAA", start=dt.date(2019, 1, 1), end=dt.date(2020, 6, 30))
     _seed(test_db_session, "SPY", start=dt.date(2019, 1, 1), end=dt.date(2020, 6, 30), seed=4.0)
