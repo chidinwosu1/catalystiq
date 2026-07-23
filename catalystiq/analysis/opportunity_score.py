@@ -694,3 +694,28 @@ def scan_universe_fast(
     if entry is not None:
         return entry.scan
     return _warming_scan(now, top_c, symbols)
+
+
+def scan_cache_debug(monotonic=_time.monotonic) -> dict:
+    """Read-only snapshot of the scan cache / in-flight state for diagnostics.
+    Explains WHY the Trade Center may be empty: is a real scan cached, how many
+    candidates / eligible symbols did it find, and is a background warm still
+    running? Never triggers a scan or mutates state."""
+    with _SCAN_CACHE_LOCK:
+        entries = []
+        for (symbols, top), e in _SCAN_CACHE.items():
+            entries.append({
+                "universe_size": len(symbols),
+                "top": top,
+                "age_seconds": round(monotonic() - e.stored_at, 1),
+                "candidate_count": len(e.scan.candidates),
+                "eligible_count": e.scan.eligible_count,
+                "note": e.scan.note,
+                "as_of": e.scan.as_of.isoformat() if e.scan.as_of else None,
+            })
+        in_flight = len(_SCAN_INFLIGHT)
+    return {
+        "cached_scans": entries,
+        "background_warm_in_flight": in_flight,
+        "is_warming": in_flight > 0 and not any(x["candidate_count"] for x in entries),
+    }
