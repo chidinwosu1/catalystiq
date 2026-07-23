@@ -357,11 +357,11 @@ def _rising(n, base, trend, amp):
     return [base + trend * i + amp * math.sin(i / 5.0) for i in range(n)]
 
 
-def test_scan_attaches_independent_entry_quality_to_each_candidate(
-    client, test_db_session, monkeypatch
-):
-    """Each Setup Strength candidate carries its own Entry Quality block - the
-    two scores are independent and travel together (one per card)."""
+def test_scan_does_not_block_on_entry_quality(client, test_db_session, monkeypatch):
+    """The scan (background warm path) must NOT fetch intraday data - candidates
+    render on Setup Strength alone, and the card polls Entry Quality separately.
+    So scan candidates carry entry_quality=None and the intraday provider is
+    never touched during the scan."""
     import catalystiq.providers.market_data as market_data
     from catalystiq.analysis.entry_quality import clear_entry_quality_cache
     from catalystiq.analysis.opportunity_score import clear_scan_cache
@@ -369,17 +369,18 @@ def test_scan_attaches_independent_entry_quality_to_each_candidate(
     from catalystiq.providers.market_data import get_market_data_provider
     from catalystiq.schemas.market_data import FundamentalsSnapshot, Quote
 
-    intraday, _ = _healthy_dataset()
     today = dt.date.today()
+    intraday_calls = {"n": 0}
 
     class _FakeProvider:
-        PROVIDER_NAME = "fake_scan_intraday"
+        PROVIDER_NAME = "fake_scan"
 
         def get_ohlcv(self, symbol, start, end=None, interval="1d"):
             return _daily_bars(_bizdays_ending(today, 300), _rising(300, 100, 0.25, 4))
 
         def get_intraday_ohlcv(self, symbol, *, interval="5m", days=20):
-            return intraday
+            intraday_calls["n"] += 1  # must NOT be hit during the scan
+            return []
 
         def get_quote(self, symbol):
             return Quote(symbol=symbol.upper(), price=175.0, previous_close=174.0,
@@ -395,8 +396,6 @@ def test_scan_attaches_independent_entry_quality_to_each_candidate(
     provider = _FakeProvider()
     clear_scan_cache()
     clear_entry_quality_cache()
-    # The Entry Check feed uses the DEDICATED intraday provider factory, not the
-    # daily scan provider - point both at the fake so the test is hermetic.
     app.dependency_overrides[get_market_data_provider] = lambda: provider
     monkeypatch.setattr(market_data, "get_intraday_market_data_provider", lambda: provider)
     try:
@@ -409,65 +408,50 @@ def test_scan_attaches_independent_entry_quality_to_each_candidate(
     assert r.status_code == 200
     candidates = r.json()["candidates"]
     assert candidates
+    # Candidates are real Setup Strength scores; entry_quality is NOT attached
+    # by the scan (the card polls it), and the scan never fetched intraday data.
     for c in candidates:
-        eq = c["entry_quality"]
-        assert eq is not None
-        assert eq["score_type"] == "entry_quality"
-        assert eq["symbol"] == c["symbol"]
-        assert eq["status"] == "available"
-        assert 0 <= eq["score"] <= 100
-        # The two scores are genuinely independent contracts.
-        assert eq["formula_version"] == "entry_quality_v1"
+        assert c["status"] == "available"
         assert c["formula_version"] == "opportunity_score_v1"
+        assert c["entry_quality"] is None
+    assert intraday_calls["n"] == 0
 
 
-def test_scan_entry_quality_degrades_when_provider_lacks_intraday(
-    client, test_db_session, monkeypatch
-):
+def test_entry_quality_endpoint_serves_the_card_feed(client, test_db_session, monkeypatch):
+    """The per-symbol endpoint the cards / pop-out poll returns a full Entry
+    Quality + Entry Check, sourced from the dedicated intraday provider."""
     import catalystiq.providers.market_data as market_data
     from catalystiq.analysis.entry_quality import clear_entry_quality_cache
-    from catalystiq.analysis.opportunity_score import clear_scan_cache
-    from catalystiq.main import app
-    from catalystiq.providers.market_data import get_market_data_provider
-    from catalystiq.schemas.market_data import FundamentalsSnapshot, Quote
 
-    today = dt.date.today()
+    intraday, _ = _healthy_dataset()
 
-    class _NoIntraday:
-        PROVIDER_NAME = "fake_no_intraday"
+    class _IntradayProvider:
+        PROVIDER_NAME = "fake_card_feed"
 
-        def get_ohlcv(self, symbol, start, end=None, interval="1d"):
-            return _daily_bars(_bizdays_ending(today, 300), _rising(300, 100, 0.25, 4))
+        def get_intraday_ohlcv(self, symbol, *, interval="5m", days=20):
+            return intraday
 
         def get_quote(self, symbol):
-            return Quote(symbol=symbol.upper(), price=175.0, previous_close=174.0,
+            from catalystiq.schemas.market_data import Quote
+
+            return Quote(symbol=symbol.upper(), price=175.0,
                          as_of=dt.datetime.now(dt.timezone.utc))
 
-        def get_fundamentals(self, symbol):
-            return FundamentalsSnapshot(symbol=symbol.upper(), sector="Technology",
-                                        as_of=dt.datetime.now(dt.timezone.utc))
-
-        def get_news(self, symbol, limit=10):
-            return []
-
-    provider = _NoIntraday()
-    clear_scan_cache()
     clear_entry_quality_cache()
-    app.dependency_overrides[get_market_data_provider] = lambda: provider
-    monkeypatch.setattr(market_data, "get_intraday_market_data_provider", lambda: provider)
+    monkeypatch.setattr(
+        market_data, "get_intraday_market_data_provider", lambda: _IntradayProvider()
+    )
     try:
-        r = client.get("/analysis/opportunity-scan", params={"top": 1, "symbols": "NVDA"})
+        r = client.get("/analysis/NVDA/entry-quality")
     finally:
-        del app.dependency_overrides[get_market_data_provider]
-        clear_scan_cache()
         clear_entry_quality_cache()
 
     assert r.status_code == 200
-    candidates = r.json()["candidates"]
-    assert candidates
-    for c in candidates:
-        # Setup Strength is fully available; Entry Quality honestly degrades to
-        # insufficient_data (never a fabricated number) with no intraday feed.
-        assert c["status"] == "available"
-        assert c["entry_quality"]["status"] == "insufficient_data"
-        assert c["entry_quality"]["score"] is None
+    body = r.json()
+    assert body["score_type"] == "entry_quality"
+    assert body["status"] == "available"
+    assert 0 <= body["score"] <= 100
+    assert body["entry_check"] is not None
+    assert body["entry_check"]["system_status"] in {
+        "favorable", "almost_ready", "wait_for_pullback", "avoid"
+    }

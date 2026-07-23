@@ -241,6 +241,7 @@ def get_market_data_diagnostics(
         checked_at=dt.datetime.now(dt.timezone.utc),
         config={
             "market_data_provider": settings.market_data_provider,
+            "market_data_fallback_provider": settings.market_data_fallback_provider or None,
             "intraday_market_data_provider": settings.intraday_market_data_provider,
             "webull_market_data_configured": bool(
                 settings.webull_app_key and settings.webull_app_secret

@@ -101,6 +101,14 @@ class Settings(BaseSettings):
     # settings below are the forward-looking source-priority controls (§16).
     market_data_provider: str = "yahoo"
 
+    # Optional failover for the daily price/quote path. When the primary
+    # (Yahoo) is RATE-LIMITED on an OHLCV/quote call, retry that call against
+    # this secondary so the universe scan still produces candidates instead of
+    # an empty "warming up" Trade Center. "webull" uses Webull OpenAPI Market
+    # Data via the existing Webull app credentials. Empty (default) = no
+    # failover. Fundamentals/news never fail over (secondary lacks them).
+    market_data_fallback_provider: str = ""  # "" | "webull"
+
     # --- Intraday (Entry Check) market-data source -------------------------
     # The real-time Entry Quality / Entry Check feed is served by a DEDICATED
     # provider, independent of the daily-history provider above so the daily

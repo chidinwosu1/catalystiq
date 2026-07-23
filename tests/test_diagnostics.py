@@ -109,6 +109,7 @@ def test_diagnostics_reports_config_and_scan_cache(client, monkeypatch):
     body = r.json()
     assert set(body["config"]) == {
         "market_data_provider",
+        "market_data_fallback_provider",
         "intraday_market_data_provider",
         "webull_market_data_configured",
     }

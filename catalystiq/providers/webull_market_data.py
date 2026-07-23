@@ -215,32 +215,39 @@ class WebullMarketDataProvider(MarketDataProvider):
 
     # -- MarketDataProvider surface ------------------------------------------
 
-    def get_intraday_ohlcv(
-        self, symbol: str, *, interval: str = "5m", days: int = 20
-    ) -> list[IntradayBar]:
-        timespan = _TIMESPAN_BY_INTERVAL.get(interval)
-        if timespan is None:
-            raise MarketDataError(f"Unsupported Webull intraday interval {interval!r}")
-        count = max(1, days) * _BARS_PER_SESSION
+    # Hard cap on bars requested in one call (Webull limits page size).
+    _MAX_COUNT = 1200
+
+    def _fetch_bars(self, symbol: str, timespan: str, count: int) -> list[IntradayBar]:
         payload = self._call(
             ("get_history_bar", "get_bars", "get_history_bars"),
             symbol=symbol.upper(), category=_US_EQUITY_CATEGORY,
-            timespan=timespan, count=count,
+            timespan=timespan, count=min(max(1, count), self._MAX_COUNT),
         )
         record_fetch(self.PROVIDER_NAME)
         bars = [b for b in (_parse_bar(r) for r in _rows_from_payload(payload)) if b]
         bars.sort(key=lambda b: b.timestamp)
         return bars
 
+    def get_intraday_ohlcv(
+        self, symbol: str, *, interval: str = "5m", days: int = 20
+    ) -> list[IntradayBar]:
+        timespan = _TIMESPAN_BY_INTERVAL.get(interval)
+        if timespan is None:
+            raise MarketDataError(f"Unsupported Webull intraday interval {interval!r}")
+        return self._fetch_bars(symbol, timespan, max(1, days) * _BARS_PER_SESSION)
+
     def get_ohlcv(
         self, symbol: str, start: dt.date, end: dt.date | None = None, interval: str = "1d"
     ) -> list[OHLCVBar]:
-        intraday = self.get_intraday_ohlcv(
-            symbol, interval=interval if interval in _TIMESPAN_BY_INTERVAL else "1d", days=400
-        )
+        # Daily failover path: request one bar per calendar day in the range
+        # (padded), not per intraday slot.
+        timespan = _TIMESPAN_BY_INTERVAL.get(interval, "d1")
         end = end or dt.date.today()
+        count = (end - start).days + 5 if timespan == "d1" else max(1, (end - start).days) * _BARS_PER_SESSION
+        bars = self._fetch_bars(symbol, timespan, count)
         out: list[OHLCVBar] = []
-        for b in intraday:
+        for b in bars:
             d = b.timestamp.date()
             if d < start or d > end:
                 continue
