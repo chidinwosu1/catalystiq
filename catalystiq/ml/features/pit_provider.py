@@ -29,6 +29,7 @@ import datetime as dt
 import math
 from typing import Callable
 
+from catalystiq.analysis.config import DEFAULT_TECHNICAL_CONFIG as _TECH_CFG
 from catalystiq.analysis.opportunity_score import build_opportunity_score
 from catalystiq.pipelines.freshness import FreshnessPolicy
 from catalystiq.schemas.market_data import OHLCVBar
@@ -41,6 +42,19 @@ from catalystiq.ml.labels.barriers import Bar
 # licensing class in the feature schema (our own derived values), so these
 # features pass the licensing gate. Underlying inputs are validated Silver.
 _PROVIDER = "computed"
+
+# Max calendar-day gap between the prediction's last closed session and the
+# next stored bar for that bar to count as "the next session". Covers long
+# weekends + holidays; a larger gap means the next bar is a disconnected future
+# bar (or a halt/delisting), so entry there is refused (fail closed).
+MAX_ENTRY_GAP_DAYS = 7
+
+# Longest hard lookback (in closed sessions) any REGISTERED feature needs to
+# emit a value: the 200-day SMA, and the market-regime classifier which itself
+# needs the benchmark's 200-day SMA. An opt-in feature-window cap smaller than
+# this would silently DROP features that full history produces (turn them
+# MISSING), so the provider fails closed rather than degrade the vector.
+LONGEST_FEATURE_LOOKBACK_BARS = max(_TECH_CFG.sma_windows)
 
 
 def _reading(readings, name):
@@ -107,6 +121,20 @@ class SilverPointInTimeProvider:
     benchmark_symbol / sector_resolver:
         Optional market/sector context for relative-strength & beta features.
         When their Silver bars are absent, those features are emitted MISSING.
+    max_feature_bars:
+        Opt-in feature-window cap (default ``None`` = full point-in-time
+        history). When set, only the most recent ``max_feature_bars`` closed
+        sessions feed the windowed/bounded-lookback snapshots, bounding
+        per-example CPU on long histories. It is EXACT for windowed indicators
+        (SMA, realized vol, relative volume, momentum, the 60-day
+        benchmark-relative returns, the regime's SMA200/vol) and convergent
+        (``adjust=False`` EMA warm-up, ~1e-12 at 500 bars) for RSI/MACD/ATR.
+        The genuinely long-memory features - ``beta_60d`` (cov/var over all
+        aligned returns) and the support/resistance distances (levels persist
+        for years) - are DELIBERATELY computed on the uncapped as-of series so
+        they stay bit-identical. A cap below
+        :data:`LONGEST_FEATURE_LOOKBACK_BARS` is rejected (fail closed) rather
+        than silently dropping features that full history would produce.
     """
 
     def __init__(
@@ -118,12 +146,22 @@ class SilverPointInTimeProvider:
         freshness_policy: FreshnessPolicy | None = None,
         retrieved_at: dt.datetime | None = None,
         bars_loader: Callable[[str, object], list[OHLCVBar]] | None = None,
+        max_feature_bars: int | None = None,
     ) -> None:
+        if max_feature_bars is not None and max_feature_bars < LONGEST_FEATURE_LOOKBACK_BARS:
+            raise ValueError(
+                f"max_feature_bars={max_feature_bars} is below the longest "
+                f"registered-feature lookback ({LONGEST_FEATURE_LOOKBACK_BARS} "
+                "sessions, e.g. sma_200 / the 200-day market-regime SMA). A cap "
+                "this small would silently drop point-in-time features instead of "
+                "computing them; increase the cap or pass None for full history."
+            )
         self.db = db
         self.benchmark_symbol = benchmark_symbol
         self.sector_resolver = sector_resolver or _default_sector_resolver
         self.freshness_policy = freshness_policy or FreshnessPolicy()
         self.retrieved_at = retrieved_at
+        self.max_feature_bars = max_feature_bars
         # Injectable for tests; defaults to the real Silver read path.
         self._bars_loader = bars_loader or _default_bars_loader
 
@@ -178,7 +216,7 @@ class SilverPointInTimeProvider:
         # truncated (point-in-time) bars.
         snaps = _compute_snapshots(symbol, bars, prediction_timestamp,
                                    self.benchmark_symbol, self.sector_resolver,
-                                   self._bars_asof)
+                                   self._bars_asof, self.max_feature_bars)
         tech, risk, vol, ctx = snaps.tech, snaps.risk, snaps.vol, snaps.ctx
 
         last = bars[-1]
@@ -276,17 +314,35 @@ class SilverPointInTimeProvider:
         return features
 
     def get_executable_entry(self, symbol: str, prediction_timestamp: dt.datetime):
-        """Next session's executable open AFTER the prediction timestamp.
+        """The IMMEDIATELY-following session's executable open after the
+        prediction timestamp - or ``None`` (fail closed).
 
-        Offline (historical) this reads the next stored Silver bar; at true
-        live inference that bar does not exist yet, so this returns None -
-        entry is never assumed at a price already known at prediction time.
+        Fails closed - never returning a disconnected future bar as the entry -
+        when any of these holds:
+          * no point-in-time history exists at/before the prediction date
+            (the requested date precedes the ingested Silver history), or
+          * there is no session after the prediction date (true live
+            inference: the next open is not yet knowable), or
+          * the next available bar is not contiguous - a gap larger than
+            ``MAX_ENTRY_GAP_DAYS`` calendar days means the bar is a distant
+            future bar (or the symbol was halted/delisted), not the next
+            session, and entering there would leak future information.
         """
         last_closed = self.freshness_policy.latest_expected_session(prediction_timestamp)
-        for b in self._all_bars(symbol):
-            if last_closed is None or b.date > last_closed:
+        if last_closed is None:
+            return None
+        bars = self._all_bars(symbol)
+        # Point-in-time history MUST exist at/before the prediction date, else
+        # there is nothing to base a prediction on and the "next" bar would be
+        # a future bar disconnected from any as-of state.
+        if not any(b.date <= last_closed for b in bars):
+            return None
+        for b in bars:
+            if b.date > last_closed:
                 if b.open is None:
                     return None
+                if (b.date - last_closed).days > MAX_ENTRY_GAP_DAYS:
+                    return None  # not the next session -> disconnected future bar
                 entry_session = dt.datetime.combine(b.date, dt.time(), tzinfo=prediction_timestamp.tzinfo)
                 return (entry_session, float(b.open))
         return None
@@ -322,38 +378,70 @@ class _Snapshots:
                  "market_return_20d", "sector_return_20d")
 
 
-def _compute_snapshots(symbol, bars, prediction_timestamp, benchmark_symbol, sector_resolver, bars_asof):
+def _compute_snapshots(symbol, bars, prediction_timestamp, benchmark_symbol,
+                       sector_resolver, bars_asof, max_feature_bars=None):
     from catalystiq.analysis.indicators import compute_technical_snapshot
     from catalystiq.analysis.market_context import compute_market_context_snapshot
     from catalystiq.analysis.market_structure import compute_market_structure_snapshot
     from catalystiq.analysis.risk import compute_risk_snapshot
     from catalystiq.analysis.volume_liquidity import compute_volume_liquidity_snapshot
 
+    # Full point-in-time series. bars_asof() already truncates the benchmark /
+    # sector series to the last closed session at/before the prediction
+    # timestamp, so these use only point-in-time data (no look-ahead). ``bars``
+    # is the (full) as-of asset series passed in by the caller.
+    full_market = bars_asof(benchmark_symbol, prediction_timestamp) if benchmark_symbol else []
+    sector_symbol = sector_resolver(symbol) if sector_resolver else None
+    full_sector = bars_asof(sector_symbol, prediction_timestamp) if sector_symbol else []
+
+    # Opt-in feature-window cap: keep only the most recent N closed sessions for
+    # the windowed / bounded-lookback snapshots. EXACT for windowed indicators
+    # (cap >= their window) and convergent for the adjust=False EMA indicators
+    # (RSI/MACD/ATR).
+    #
+    # Two consumed features are genuinely LONG-MEMORY - their value can depend on
+    # bars far older than any fixed window - so they are DELIBERATELY computed on
+    # the UNCAPPED as-of series to stay bit-identical with or without the cap:
+    #   * beta_60d: risk.py computes cov/var over ALL aligned returns, not a
+    #     fixed window.
+    #   * dist_to_support_pct / dist_to_resistance_pct: support/resistance levels
+    #     are drawn from swing structure that can persist for years, so the
+    #     nearest active level may sit older than the cap.
+    # Both remain point-in-time (only bars <= the last closed session) and
+    # look-ahead invariant, exactly like the capped features.
+    def _cap(seq):
+        if max_feature_bars is not None and len(seq) > max_feature_bars:
+            return seq[-max_feature_bars:]
+        return seq
+
+    asset = _cap(bars)
+    market = _cap(full_market)
+    sector = _cap(full_sector)
+
     s = _Snapshots()
-    s.tech = compute_technical_snapshot(symbol, bars)
-    s.risk = compute_risk_snapshot(symbol, bars)
-    s.vol = compute_volume_liquidity_snapshot(symbol, bars)
+    s.tech = compute_technical_snapshot(symbol, asset)
+    s.risk = compute_risk_snapshot(
+        symbol, bars, benchmark_bars=full_market or None, benchmark_symbol=benchmark_symbol,
+    )
+    s.vol = compute_volume_liquidity_snapshot(symbol, asset)
+    # Full history: support/resistance levels are long-memory (see note above).
     s.struct = compute_market_structure_snapshot(symbol, bars)
 
-    market_bars = bars_asof(benchmark_symbol, prediction_timestamp) if benchmark_symbol else []
-    sector_symbol = sector_resolver(symbol) if sector_resolver else None
-    sector_bars = bars_asof(sector_symbol, prediction_timestamp) if sector_symbol else []
-
     s.ctx = compute_market_context_snapshot(
-        symbol, bars, market_bars=market_bars or None, market_symbol=benchmark_symbol,
-        sector_bars=sector_bars or None, sector_symbol=sector_symbol,
+        symbol, asset, market_bars=market or None, market_symbol=benchmark_symbol,
+        sector_bars=sector or None, sector_symbol=sector_symbol,
     )
-    s.market_return_20d = _window_return(market_bars, 20) if market_bars else None
-    s.sector_return_20d = _window_return(sector_bars, 20) if sector_bars else None
+    s.market_return_20d = _window_return(market, 20) if market else None
+    s.sector_return_20d = _window_return(sector, 20) if sector else None
 
     from catalystiq.ml.features.regime import classify_market_regime
 
-    s.regime = classify_market_regime(market_bars, symbol=benchmark_symbol) if market_bars else None
+    s.regime = classify_market_regime(market, symbol=benchmark_symbol) if market else None
 
     s.opportunity = build_opportunity_score(
-        symbol, bars, now=prediction_timestamp,
-        market_bars=market_bars or None, market_symbol=benchmark_symbol,
-        sector_bars=sector_bars or None, sector_symbol=sector_symbol,
+        symbol, asset, now=prediction_timestamp,
+        market_bars=market or None, market_symbol=benchmark_symbol,
+        sector_bars=sector or None, sector_symbol=sector_symbol,
     )
     return s
 
