@@ -13,6 +13,8 @@ import datetime as dt
 
 from pydantic import BaseModel
 
+from catalystiq.schemas.entry_quality import EntryQualityScore
+
 
 class FactorScore(BaseModel):
     name: str
@@ -51,6 +53,11 @@ class OpportunityScore(BaseModel):
     warnings: list[str]
     ml: MlStatus
     reason: str | None = None  # populated when status == "insufficient_data"
+    # The real-time, intraday Entry Quality Score - INDEPENDENT of this daily
+    # Setup Strength. Answers "is this a high-quality MOMENT to enter?" vs Setup
+    # Strength's "is this a high-quality STOCK to trade?". None when not computed
+    # (e.g. no intraday feed); insufficient_data when intraday inputs are missing.
+    entry_quality: EntryQualityScore | None = None
 
 
 class OpportunityScan(BaseModel):

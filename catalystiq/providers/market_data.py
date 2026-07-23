@@ -13,6 +13,7 @@ from catalystiq.providers.base import DataDomain
 from catalystiq.providers.fetch_tracker import record_fetch
 from catalystiq.schemas.market_data import (
     FundamentalsSnapshot,
+    IntradayBar,
     NewsItem,
     OHLCVBar,
     Quote,
@@ -130,6 +131,53 @@ class YahooFinanceProvider(MarketDataProvider):
             )
         return bars
 
+    def get_intraday_ohlcv(
+        self,
+        symbol: str,
+        *,
+        interval: str = "5m",
+        days: int = 20,
+    ) -> list[IntradayBar]:
+        """Timestamped intraday OHLCV for the Entry Quality Score.
+
+        Returns the last ``days`` sessions of ``interval`` bars (default 20
+        sessions of 5-minute bars) so callers get the current session plus a
+        prior-session baseline for relative-volume-by-time-of-day. This is an
+        OPTIONAL provider capability (not on the abstract contract); callers
+        duck-type it and degrade to insufficient_data when a provider lacks it.
+        A fetch failure raises MarketDataError; empty data returns ``[]``."""
+        try:
+            df = self._ticker(symbol).history(
+                period=f"{max(1, days)}d", interval=interval, auto_adjust=False
+            )
+        except Exception as exc:  # pragma: no cover - network/library errors
+            raise MarketDataError(
+                f"Failed to fetch intraday OHLCV for {symbol}: {exc}"
+            ) from exc
+
+        record_fetch(self.PROVIDER_NAME)
+        if df.empty:
+            return []
+
+        bars: list[IntradayBar] = []
+        for index, row in df.iterrows():
+            ts = index.to_pydatetime()
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=dt.timezone.utc)
+            else:
+                ts = ts.astimezone(dt.timezone.utc)
+            bars.append(
+                IntradayBar(
+                    timestamp=ts,
+                    open=float(row["Open"]),
+                    high=float(row["High"]),
+                    low=float(row["Low"]),
+                    close=float(row["Close"]),
+                    volume=int(row["Volume"]),
+                )
+            )
+        return bars
+
     def get_fundamentals(self, symbol: str) -> FundamentalsSnapshot:
         try:
             info = self._ticker(symbol).info
@@ -199,3 +247,65 @@ def get_market_data_provider() -> MarketDataProvider:
     if provider_name == "yahoo":
         return YahooFinanceProvider()
     raise ValueError(f"Unknown market data provider: {provider_name}")
+
+
+# --- Dedicated intraday (Entry Check) provider ------------------------------
+# The real-time Entry Quality / Entry Check feed uses its OWN provider so the
+# daily pipeline, fundamentals and news stay on Yahoo. Webull's OpenAPI Market
+# Data serves real-time L1 US quotes + 1m/5m bars; Yahoo (default) reuses the
+# daily provider. The Webull client is expensive to build (signed SDK client),
+# so instances are cached per credential set; construction failures are NOT
+# cached (a missing-credential error surfaces on every request).
+
+import threading as _threading  # noqa: E402
+
+_intraday_provider_cache: dict[tuple, MarketDataProvider] = {}
+_intraday_provider_lock = _threading.Lock()
+
+
+def reset_intraday_provider_cache() -> None:
+    """Drop any cached intraday provider. Test-support / config-reload hook."""
+    with _intraday_provider_lock:
+        _intraday_provider_cache.clear()
+
+
+def get_intraday_market_data_provider() -> MarketDataProvider:
+    """The provider that serves the real-time Entry Check feed, chosen by
+    ``intraday_market_data_provider``. Defaults to (and falls back to) the Yahoo
+    daily provider; ``"webull"`` uses Webull OpenAPI Market Data via the existing
+    Webull app credentials. Never raises for an unknown value - it degrades to
+    the default provider, so Entry Check keeps working (delayed) rather than
+    500-ing."""
+    from catalystiq.config import get_settings
+
+    settings = get_settings()
+    choice = (settings.intraday_market_data_provider or "yahoo").strip().lower()
+
+    if choice == "webull":
+        key = (
+            "webull",
+            settings.webull_app_key,
+            settings.webull_app_secret,
+            settings.webull_region_id,
+            settings.webull_mdata_api_base_url,
+        )
+        cached = _intraday_provider_cache.get(key)
+        if cached is not None:
+            return cached
+        with _intraday_provider_lock:
+            cached = _intraday_provider_cache.get(key)
+            if cached is not None:
+                return cached
+            from catalystiq.providers.webull_market_data import WebullMarketDataProvider
+
+            provider = WebullMarketDataProvider(
+                settings.webull_app_key,
+                settings.webull_app_secret,
+                region_id=settings.webull_region_id,
+                api_endpoint=settings.webull_mdata_api_base_url,
+            )
+            _intraday_provider_cache[key] = provider
+            return provider
+
+    # Default / "yahoo" / any unknown value: reuse the daily provider.
+    return get_market_data_provider()

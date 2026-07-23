@@ -21,6 +21,21 @@ class OHLCVBar(BaseModel):
     volume: int
 
 
+class IntradayBar(BaseModel):
+    """A single intraday OHLCV bar, timestamped to the minute (unlike the
+    date-only daily ``OHLCVBar``). Used by the real-time Entry Quality Score,
+    which needs sub-daily granularity for VWAP, opening range, intraday RSI and
+    relative-volume-by-time-of-day. ``timestamp`` is the bar's *open* time and is
+    timezone-aware (UTC)."""
+
+    timestamp: dt.datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int
+
+
 class Quote(BaseModel):
     symbol: str
     price: float

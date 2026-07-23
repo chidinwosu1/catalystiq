@@ -449,6 +449,74 @@ export interface OpportunityUnavailableFactor {
   reason: string;
 }
 
+export interface EntryQualityComponent {
+  name: string;
+  score: number | null;
+  max_score: number;
+  status: "available" | "insufficient_data";
+  inputs: Record<string, unknown>;
+  explanation: string;
+  formula_version: string;
+}
+
+export interface EntryReason {
+  key: string;
+  label: string;
+  state: "good" | "bad" | "pending";
+}
+
+/**
+ * Plain-language verdict layer over the Entry Quality components. All text is
+ * templated server-side from validated decision reasons (never free AI prose).
+ */
+export interface EntryCheck {
+  system_status:
+    | "favorable"
+    | "almost_ready"
+    | "wait_for_pullback"
+    | "avoid"
+    | "data_unavailable";
+  user_status: string;
+  headline: string;
+  what_to_do: string;
+  current_price: number | null;
+  preferred_entry_low: number | null;
+  preferred_entry_high: number | null;
+  distance_to_entry_pct: number | null;
+  exit_level: number | null;
+  target: number | null;
+  possible_loss_per_share: number | null;
+  possible_gain_per_share: number | null;
+  reward_to_risk: number | null;
+  confirmation: boolean;
+  confirmation_label: string;
+  reasons: EntryReason[];
+  data_state: "current" | "unavailable";
+}
+
+/**
+ * The real-time, intraday Entry Quality Score - INDEPENDENT of the daily Setup
+ * Strength (OpportunityScore). Answers "is this a high-quality MOMENT to
+ * enter?" vs Setup Strength's "is this a high-quality STOCK to trade?".
+ */
+export interface EntryQualityScore {
+  symbol: string;
+  status: "available" | "insufficient_data";
+  score_type: string; // "entry_quality"
+  score: number | null;
+  max_score: number;
+  rating: string | null; // "Excellent Entry" .. "Poor Entry"
+  formula_version: string;
+  calculated_at: string;
+  data_as_of: string | null;
+  interval: string | null;
+  component_coverage: string;
+  components: EntryQualityComponent[];
+  warnings: string[];
+  reason: string | null;
+  entry_check: EntryCheck | null;
+}
+
 export interface OpportunityScore {
   symbol: string;
   status: "available" | "insufficient_data";
@@ -466,6 +534,12 @@ export interface OpportunityScore {
   warnings: string[];
   ml: { status: string; reason: string };
   reason: string | null;
+  /** Independent real-time Entry Quality; null when not computed. */
+  entry_quality: EntryQualityScore | null;
+}
+
+export function getEntryQualityScore(symbol: string): Promise<EntryQualityScore> {
+  return request(`/analysis/${encodeURIComponent(symbol)}/entry-quality`);
 }
 
 export function getOpportunityScore(symbol: string): Promise<OpportunityScore> {
