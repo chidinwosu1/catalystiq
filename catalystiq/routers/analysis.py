@@ -32,6 +32,7 @@ from catalystiq.providers.market_data import (
     get_market_data_provider,
 )
 from catalystiq.schemas.analysis import TechnicalSnapshot
+from catalystiq.schemas.diagnostics import MarketDataDiagnostics, ProviderProbe
 from catalystiq.schemas.entry_quality import EntryQualityScore
 from catalystiq.schemas.opportunity import OpportunityScan, OpportunityScore
 from catalystiq.schemas.market_context import MarketContextSnapshot
@@ -143,6 +144,115 @@ def get_entry_quality_score(symbol: str):
     provider has no intraday feed. This is the endpoint the Trade Center cards
     and Entry Check pop-out poll every 15 seconds."""
     return resolve_entry_quality(symbol, dt.datetime.now(dt.timezone.utc))
+
+
+_DIAGNOSTIC_CANARY = "SPY"
+
+
+def _probe_provider(factory, symbol: str, *, intraday: bool) -> ProviderProbe:
+    """Live health probe of a market-data provider. Constructs it (catching a
+    missing-credential / import failure), then makes ONE light, gated call
+    (intraday bars or a quote) and classifies any failure as rate-limited or
+    not. Never raises - a probe failure IS the diagnostic result."""
+    import time as _t
+
+    from catalystiq.providers.fundamentals_cache import is_rate_limited_error
+    from catalystiq.providers.market_data_gate import get_gate_for
+
+    t0 = _t.perf_counter()
+    try:
+        provider = factory()
+    except Exception as exc:  # provider could not even be constructed
+        return ProviderProbe(
+            provider="unavailable", symbol=symbol, ok=False,
+            rate_limited=is_rate_limited_error(exc), detail=str(exc)[:300],
+            latency_ms=int((_t.perf_counter() - t0) * 1000),
+        )
+
+    name = getattr(provider, "PROVIDER_NAME", type(provider).__name__)
+    try:
+        if intraday and callable(getattr(provider, "get_intraday_ohlcv", None)):
+            bars = get_gate_for(provider).run(
+                f"probe-intraday {symbol}",
+                lambda: provider.get_intraday_ohlcv(symbol, interval="5m", days=1),
+            )
+            ok, detail = bool(bars), (
+                f"fetched {len(bars)} intraday bars" if bars else "no intraday bars returned"
+            )
+        else:
+            quote = get_gate_for(provider).run(
+                f"probe-quote {symbol}", lambda: provider.get_quote(symbol)
+            )
+            ok, detail = True, f"quote ok: ${quote.price:.2f}"
+        rate_limited = False
+    except Exception as exc:
+        ok, rate_limited, detail = False, is_rate_limited_error(exc), str(exc)[:300]
+    return ProviderProbe(
+        provider=name, symbol=symbol, ok=ok, rate_limited=rate_limited,
+        detail=detail, latency_ms=int((_t.perf_counter() - t0) * 1000),
+    )
+
+
+@router.get("/diagnostics/market-data", response_model=MarketDataDiagnostics)
+def get_market_data_diagnostics(
+    symbol: str = Query(default=_DIAGNOSTIC_CANARY, description="Canary symbol to probe."),
+):
+    """One-call market-data health check that explains WHY the Trade Center may
+    be empty. Probes the daily (Setup Strength / scan) provider and the intraday
+    (Entry Check) provider live, reports the rate-limit gate counters and the
+    scan-cache state, and summarizes the likely cause. Makes two light,
+    gated provider calls; safe to hit on demand."""
+    from catalystiq.analysis.opportunity_score import scan_cache_debug
+    from catalystiq.config import get_settings
+    from catalystiq.providers.market_data import (
+        get_intraday_market_data_provider,
+        get_market_data_provider,
+    )
+    from catalystiq.providers.market_data_gate import market_data_gate_stats
+
+    settings = get_settings()
+    daily = _probe_provider(get_market_data_provider, symbol, intraday=False)
+    intraday = _probe_provider(get_intraday_market_data_provider, symbol, intraday=True)
+    scan_cache = scan_cache_debug()
+
+    # Summarize the likely cause, most-actionable first.
+    if daily.rate_limited or any(
+        s.get("rate_limited", 0) or s.get("cooldown_short_circuits", 0)
+        for s in market_data_gate_stats().values()
+    ):
+        summary = (
+            "Upstream rate limit detected on the daily provider - the scan can't "
+            "fetch history, so no candidates appear. This is a provider (Yahoo) "
+            "per-IP throttle, not the Entry Check code."
+        )
+    elif not daily.ok:
+        summary = f"Daily provider unreachable ({daily.detail}); the scan cannot produce candidates."
+    elif any(e["candidate_count"] for e in scan_cache["cached_scans"]):
+        summary = "Scan is healthy - candidates are cached and should render."
+    elif scan_cache["background_warm_in_flight"]:
+        summary = "Scan is still warming (background compute in flight); no candidates cached yet."
+    else:
+        summary = (
+            "Daily provider reachable but the scan has no eligible candidates cached yet - "
+            "trigger a scan (open Trade Center) and re-check."
+        )
+
+    return MarketDataDiagnostics(
+        checked_at=dt.datetime.now(dt.timezone.utc),
+        config={
+            "market_data_provider": settings.market_data_provider,
+            "market_data_fallback_provider": settings.market_data_fallback_provider or None,
+            "intraday_market_data_provider": settings.intraday_market_data_provider,
+            "webull_market_data_configured": bool(
+                settings.webull_app_key and settings.webull_app_secret
+            ),
+        },
+        daily_provider_probe=daily,
+        intraday_provider_probe=intraday,
+        gate_stats=market_data_gate_stats(),
+        scan_cache=scan_cache,
+        summary=summary,
+    )
 
 
 @router.get("/{symbol}/market-structure", response_model=MarketStructureSnapshot)
