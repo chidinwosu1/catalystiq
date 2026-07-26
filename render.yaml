@@ -38,11 +38,12 @@ services:
   - type: web
     name: catalystiq-api
     runtime: python
-    plan: free
+    # Paid instance so the API is always-on: no free-tier spin-down, so the
+    # first Trade Center scan after idle no longer stalls on a cold start.
+    plan: pro
     rootDir: .
     buildCommand: pip install -r requirements.txt
-    # Migrations run on each boot (idempotent); works on the free plan, which
-    # has no pre-deploy hook.
+    # Migrations run on each boot (idempotent).
     startCommand: alembic upgrade head && uvicorn catalystiq.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
