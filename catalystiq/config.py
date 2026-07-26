@@ -150,6 +150,7 @@ class Settings(BaseSettings):
     enable_nasdaq_trader: bool = True
     enable_webull: bool = False
     enable_finnhub: bool = False
+    enable_tradovate: bool = False
 
     # Provider API keys / credentials. Empty by default; only required when
     # the owning source is enabled (see validate_settings()). Never commit
@@ -173,6 +174,27 @@ class Settings(BaseSettings):
     # fair-access policy - it's not a secret, but the source is unusable
     # without it, so it's treated as required config when SEC is enabled.
     sec_user_agent: str = ""
+
+    # Tradovate futures reference data (contract/product definitions). All
+    # server-side, never in the frontend bundle. Required only when
+    # ENABLE_TRADOVATE=true (see validate_settings()).
+    #   tradovate_username / tradovate_password - the Tradovate login.
+    #   tradovate_cid / tradovate_sec           - the API application key pair
+    #       (client id + secret) from the Tradovate API app registration.
+    #   tradovate_app_id / _app_version / _device_id - optional app identifiers
+    #       Tradovate recommends but does not require.
+    # tradovate_environment defaults to "demo" (paper trading); set "live" only
+    # for a live account. A time penalty (p-ticket) or ~90-min token expiry are
+    # handled by the adapter; the token is cached for tradovate_token_ttl_seconds.
+    tradovate_username: str = ""
+    tradovate_password: str = ""
+    tradovate_cid: str = ""
+    tradovate_sec: str = ""
+    tradovate_app_id: str = ""
+    tradovate_app_version: str = "1.0"
+    tradovate_device_id: str = ""
+    tradovate_environment: str = "demo"  # "demo" (paper) | "live"
+    tradovate_token_ttl_seconds: int = 80 * 60  # renew before the ~90-min expiry
 
     # Twelve Data plan credit limits, enforced CENTRALLY through the shared
     # credit gate (catalystiq/providers/twelve_data_gate.py). Defaults are the

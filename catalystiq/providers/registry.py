@@ -72,6 +72,28 @@ SOURCE_REGISTRY: list[SourceDescriptor] = [
         implemented=True,
         notes="Price-data fallback for the Webull->Twelve Data chain. Free-tier only, not redistributable.",
     ),
+    SourceDescriptor(
+        name="tradovate",
+        domain=DataDomain.MARKET_DATA,
+        required_settings=(
+            "tradovate_username",
+            "tradovate_password",
+            "tradovate_cid",
+            "tradovate_sec",
+        ),
+        enable_setting="enable_tradovate",
+        requires_api_key=True,
+        license=LicenseClassification.PROPRIETARY,
+        base_urls=("https://demo.tradovateapi.com/v1", "https://live.tradovateapi.com/v1"),
+        implemented=True,
+        optional_settings=("tradovate_app_id", "tradovate_app_version", "tradovate_device_id"),
+        notes=(
+            "Futures contract/product reference data. Defaults to the demo "
+            "(paper-trading) host. Exchange-proprietary, account-bound, not "
+            "redistributable. Real-time quotes/bars are served over Tradovate's "
+            "Market Data WebSocket and are out of scope for this REST adapter."
+        ),
+    ),
     # --- fundamentals ---
     SourceDescriptor(
         name="sec_edgar",
@@ -292,6 +314,10 @@ def build_adapter(name: str, settings=None):
         from catalystiq.providers.finnhub_news import get_finnhub_news_provider
 
         return get_finnhub_news_provider()
+    if name == "tradovate":
+        from catalystiq.providers.tradovate import get_tradovate_provider
+
+        return get_tradovate_provider()
 
     # Unreachable: every implemented source is handled above. Guard anyway so
     # marking a source implemented without wiring it here fails loudly.
