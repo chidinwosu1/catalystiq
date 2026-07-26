@@ -371,6 +371,47 @@ def test_e2e_direction_filter_excludes_shorts(test_db_session):
     assert "XOM" in [c.symbol for c in both.candidates]
 
 
+def test_scan_universe_includes_scoreable_etfs():
+    # ETFs must be IN the universe (so an "ETFs" selection isn't empty) AND carry
+    # a governed sector benchmark (so the market/sector factor is available and
+    # the ETF can actually be scored - not skipped as insufficient_data).
+    from catalystiq.analysis.opportunity_score import SCAN_UNIVERSE
+    from catalystiq.analysis.sectors import asset_class, governed_sector_etf
+
+    etfs = [s for s in SCAN_UNIVERSE if asset_class(s) == "etf"]
+    assert etfs, "the scan universe must contain tradeable ETFs"
+    for s in etfs:
+        assert governed_sector_etf(s) is not None, f"{s} needs a governed sector benchmark"
+
+
+def test_e2e_etfs_show_up_only_when_asset_class_selected(test_db_session):
+    # XLK/XLF get the default calm uptrend from the fake provider and resolve
+    # their (self) sector benchmark from governed data, so they score as real
+    # eligible candidates.
+    provider = _FakeProvider({"AAPL": "CALM"})
+    universe = ["AAPL", "XLK", "XLF"]
+
+    etfs = scan_universe_personalized(
+        provider, test_db_session, NOW,
+        _prefs(assets=["ETFs"], risk="moderate", style="swing", max_loss_pct=10, direction="long"),
+        top=4, universe=universe,
+    )
+    got = [c.symbol for c in etfs.candidates]
+    assert "AAPL" not in got
+    assert set(got) == {"XLK", "XLF"}  # ETFs are eligible and returned
+    for c in etfs.candidates:
+        assert c.personalization.asset_class == "etf"
+
+    clear_scored_cache()
+    stocks = scan_universe_personalized(
+        provider, test_db_session, NOW,
+        _prefs(assets=["Stocks"], risk="moderate", style="swing", max_loss_pct=10, direction="long"),
+        top=4, universe=universe,
+    )
+    # Same universe, "Stocks" selected -> the ETFs are filtered out.
+    assert [c.symbol for c in stocks.candidates] == ["AAPL"]
+
+
 def test_failed_personalized_scan_returns_no_fallback_symbols(test_db_session):
     out = scan_universe_personalized(
         _ThrottledProvider(), test_db_session, NOW,

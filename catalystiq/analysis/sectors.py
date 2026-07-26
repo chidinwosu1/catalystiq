@@ -54,6 +54,25 @@ SYMBOL_SECTOR: dict[str, str] = {
     "PG": "Consumer Defensive",
     "KO": "Consumer Defensive",
     "PEP": "Consumer Defensive",
+    # --- Tradeable ETFs -------------------------------------------------
+    # ETFs need a governed sector too, or the market/sector factor degrades to
+    # insufficient_data and the ETF is skipped (never scored, never a
+    # candidate). Each SPDR sector ETF is mapped to its own sector, so its
+    # sector benchmark resolves to itself (a valid, neutral relative-strength
+    # reading). QQQ (Nasdaq-100, tech-led) benchmarks against the Technology
+    # sector ETF (XLK). See SCAN_UNIVERSE.
+    "XLK": "Technology",
+    "XLV": "Healthcare",
+    "XLF": "Financial Services",
+    "XLE": "Energy",
+    "XLY": "Consumer Cyclical",
+    "XLP": "Consumer Defensive",
+    "XLI": "Industrials",
+    "XLU": "Utilities",
+    "XLRE": "Real Estate",
+    "XLB": "Basic Materials",
+    "XLC": "Communication Services",
+    "QQQ": "Technology",
 }
 
 

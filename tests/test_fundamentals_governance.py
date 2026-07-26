@@ -101,7 +101,9 @@ def test_default_universe_scan_makes_zero_fundamentals_calls(client):
 
     assert r.status_code == 200
     body = r.json()
-    assert body["universe_size"] == 24  # SCAN_UNIVERSE
+    from catalystiq.analysis.opportunity_score import SCAN_UNIVERSE
+
+    assert body["universe_size"] == len(SCAN_UNIVERSE)  # stocks + tradeable ETFs
     # Before this change a 24-symbol scan issued 24 Yahoo `.info` calls; now 0.
     assert provider.fundamentals_calls == 0
 

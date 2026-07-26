@@ -449,14 +449,25 @@ def _scoring_max_bars() -> int:
     return get_settings().scoring_max_bars
 
 
-# Curated, liquid large-cap starter universe for the ranked scan. This is a
-# controlled eligibility list, NOT the whole market - extend/replace as needed.
-# (A full constituent universe would need a screened, maintained symbol source.)
-SCAN_UNIVERSE: tuple[str, ...] = (
+# Curated, liquid universe for the ranked scan. This is a controlled eligibility
+# list, NOT the whole market - extend/replace as needed. (A full constituent
+# universe would need a screened, maintained symbol source.)
+#
+# Includes both common stocks AND tradeable ETFs so an "ETFs" asset-class
+# preference resolves to a real, scored set (not an empty result). Each ETF has
+# governed sector membership (see catalystiq/analysis/sectors.SYMBOL_SECTOR) so
+# its market/sector factor is available; asset_class() classifies them as "etf"
+# for the personalization filter.
+_SCAN_STOCKS: tuple[str, ...] = (
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "AVGO", "TSLA",
     "JPM", "V", "MA", "BAC", "UNH", "JNJ", "LLY", "ABBV",
     "XOM", "CVX", "WMT", "COST", "PG", "KO", "PEP", "HD",
 )
+_SCAN_ETFS: tuple[str, ...] = (
+    "QQQ", "XLK", "XLF", "XLV", "XLE", "XLY",
+    "XLP", "XLI", "XLU", "XLRE", "XLB", "XLC",
+)
+SCAN_UNIVERSE: tuple[str, ...] = (*_SCAN_STOCKS, *_SCAN_ETFS)
 
 _MAX_SCAN_TOP = 10
 
