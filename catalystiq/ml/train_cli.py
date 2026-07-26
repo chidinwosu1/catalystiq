@@ -102,17 +102,30 @@ def _offline_settings(enable: bool, database_url: str | None, experiment_name: s
     return Settings(**overrides)
 
 
-def _ingest(symbols: list[str], benchmark: str, db) -> list[str]:
-    """Best-effort Silver refresh via the app's own pipeline. Returns warnings
-    for any symbol that could not be fetched (never fabricated)."""
+# Calendar-day warm-up fetched BEFORE the first prediction date so long-lookback
+# indicators (200-day SMA / regime) have history.
+INDICATOR_WARMUP_DAYS = 420
+
+
+def _ingest(symbols: list[str], benchmark: str, db, *, start: dt.date) -> list[str]:
+    """Best-effort Silver refresh via the app's own pipeline, fetching enough
+    history to COVER the requested prediction window (``start`` minus an
+    indicator warm-up). Returns warnings for any symbol that could not be
+    fetched (never fabricated).
+
+    Note: ``ensure_fresh`` only re-fetches when Silver is *stale*; it does not
+    backfill older history into an already-current symbol. Run against a fresh
+    DB to guarantee the requested range is pulled.
+    """
     from catalystiq.pipelines.market_price_pipeline import ensure_fresh
     from catalystiq.providers.market_data import MarketDataError, get_market_data_provider
 
+    days = max((dt.date.today() - start).days + INDICATOR_WARMUP_DAYS, 365 * 2)
     warnings: list[str] = []
     provider = get_market_data_provider()
     for sym in [*symbols, benchmark]:
         try:
-            ensure_fresh(sym, provider, db)
+            ensure_fresh(sym, provider, db, days=days)
         except MarketDataError as exc:
             warnings.append(f"ingest failed for {sym}: {exc}")
     return warnings
@@ -160,7 +173,7 @@ def main(argv: list[str] | None = None, *, db=None) -> int:
     ingest_warnings: list[str] = []
     try:
         if args.ingest:
-            ingest_warnings = _ingest(symbols, args.benchmark, db)
+            ingest_warnings = _ingest(symbols, args.benchmark, db, start=dt.date.fromisoformat(args.start))
 
         report = run_experiment(
             db,

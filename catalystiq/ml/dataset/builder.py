@@ -30,9 +30,11 @@ from catalystiq.ml import (
 )
 from catalystiq.ml.features.provider import PointInTimeFeatureProvider
 from catalystiq.ml.features.schema import (
+    FEATURE_CATALOG,
     DataQualityStatus,
     FeatureRejection,
     build_feature_vector,
+    missing_indicator_name,
 )
 from catalystiq.ml.labels.barriers import Bar, BothTouchedPolicy
 from catalystiq.ml.labels.costs import CostModel, DEFAULT_COST_MODEL
@@ -178,11 +180,28 @@ class TrainingExampleBuilder:
             if f.data_quality_status is DataQualityStatus.MISSING
         ]
 
+        # Fail closed: an example with NO point-in-time feature coverage as-of
+        # the prediction timestamp (every catalog feature missing) must never
+        # enter the dataset - that happens when the requested date precedes the
+        # ingested Silver history, and building it would produce a degenerate,
+        # all-missing example (silent zero completeness).
+        present_catalog = sum(
+            1 for name in FEATURE_CATALOG if vector.get(missing_indicator_name(name)) == 0
+        )
+        if present_catalog == 0:
+            dataset.skipped.append(
+                {"symbol": req.symbol, "ts": req.prediction_timestamp.isoformat(),
+                 "reason": "no point-in-time feature coverage as-of prediction timestamp "
+                           "(requested date likely precedes ingested Silver history)"}
+            )
+            return None
+
         entry = self.provider.get_executable_entry(req.symbol, req.prediction_timestamp)
         if entry is None:
             dataset.skipped.append(
                 {"symbol": req.symbol, "ts": req.prediction_timestamp.isoformat(),
-                 "reason": "no executable entry available"}
+                 "reason": "no contiguous next-session bar for an executable entry "
+                           "(no as-of history, live-inference edge, or a non-contiguous gap)"}
             )
             return None
         entry_session, entry_price = entry

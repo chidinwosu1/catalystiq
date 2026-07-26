@@ -62,4 +62,4 @@ def test_builder_skips_when_no_entry():
     b = TrainingExampleBuilder(NoEntry())
     ds = b.build([ExampleRequest("SYN", dt.datetime(2025, 1, 2, 20), "long", 5)])
     assert ds.size == 0
-    assert ds.skipped and ds.skipped[0]["reason"] == "no executable entry available"
+    assert ds.skipped and "executable entry" in ds.skipped[0]["reason"]
