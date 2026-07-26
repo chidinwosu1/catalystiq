@@ -162,6 +162,18 @@ SOURCE_REGISTRY: list[SourceDescriptor] = [
         implemented=True,
         notes="Symbol directory + reference datasets. Normalize to stable internal security ids, not raw tickers.",
     ),
+    # --- news ---
+    SourceDescriptor(
+        name="finnhub",
+        domain=DataDomain.NEWS,
+        required_settings=("finnhub_api_key",),
+        enable_setting="enable_finnhub",
+        requires_api_key=True,
+        license=LicenseClassification.FREE_PERSONAL,
+        base_urls=("https://finnhub.io/api/v1",),
+        implemented=True,
+        notes="Company news (replaces Yahoo news). Free-tier key; cached + rate-limited.",
+    ),
     # --- brokerage ---
     SourceDescriptor(
         name="webull",
@@ -288,6 +300,10 @@ def build_adapter(name: str, settings=None):
         from catalystiq.providers.twelve_data import get_twelve_data_provider
 
         return get_twelve_data_provider()
+    if name == "finnhub":
+        from catalystiq.providers.finnhub_news import get_finnhub_news_provider
+
+        return get_finnhub_news_provider()
 
     # Unreachable: every implemented source is handled above. Guard anyway so
     # marking a source implemented without wiring it here fails loudly.

@@ -196,6 +196,23 @@ class SecEdgarProvider(FundamentalsProvider):
             )
         return out
 
+    # --- company profile (name / SIC) -----------------------------------
+
+    def get_company_profile(self, cik: str) -> dict:
+        """Non-financial company profile from the submissions feed: legal name,
+        SIC code + description (used to derive sector/industry), and the primary
+        ticker. Returns a plain dict of strings/None; raises ProviderError on a
+        transport failure. Separate from get_company_facts() (the XBRL numbers)."""
+        cik = _pad_cik(cik)
+        data = self._get_json(_SUBMISSIONS_URL.format(cik=cik))
+        tickers = data.get("tickers") or []
+        return {
+            "name": data.get("name"),
+            "sic": str(data.get("sic")) if data.get("sic") else None,
+            "sic_description": data.get("sicDescription"),
+            "ticker": tickers[0] if tickers else None,
+        }
+
     # --- XBRL company facts ---------------------------------------------
 
     def get_company_facts(self, cik: str) -> list[CompanyFact]:

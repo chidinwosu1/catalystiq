@@ -171,6 +171,11 @@ class Settings(BaseSettings):
     # news endpoint stays well under the plan limit. Required only when
     # ENABLE_FINNHUB=true (see validate_settings()).
     finnhub_api_key: str = ""
+    # Company-news lookback window (days) and per-symbol result cache TTL. The
+    # cache coalesces repeated/bursty news requests so they don't spend the
+    # rate budget; 0 lookback is clamped to 1 day by the adapter.
+    finnhub_news_lookback_days: int = 14
+    finnhub_news_cache_ttl_seconds: int = 600  # 10 min
 
     # SEC EDGAR requires a descriptive User-Agent (contact info) per its
     # fair-access policy - it's not a secret, but the source is unusable

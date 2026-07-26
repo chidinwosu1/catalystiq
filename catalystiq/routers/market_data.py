@@ -156,17 +156,18 @@ def get_sectors(provider: MarketDataProvider = Depends(get_market_data_provider)
 
 
 @router.get("/fundamentals/{symbol}", response_model=FundamentalsSnapshot)
-def get_fundamentals(
-    symbol: str, provider: MarketDataProvider = Depends(get_market_data_provider)
-):
-    # Governed cache: TTL + single-flight de-dup + concurrency limit + rate-
-    # limit cooldown, so a burst (portfolio sector exposure, repeated ticker
-    # lookups) can't melt down the Yahoo endpoint. Fundamentals never block a
-    # quote - see get_quote above, which is a separate provider call.
+def get_fundamentals(symbol: str):
+    # Company fundamentals come from SEC EDGAR Company Facts (financial fields
+    # derived from XBRL; sector/industry from the SIC code; market cap / P/E from
+    # a live price * SEC shares/EPS). Served through the governed cache: TTL +
+    # single-flight de-dup + concurrency limit + rate-limit cooldown, so a burst
+    # (portfolio sector exposure, repeated lookups) stays well under SEC's
+    # fair-access limit. Fundamentals never block a quote (a separate call).
     from catalystiq.providers.fundamentals_cache import get_fundamentals_cached
+    from catalystiq.providers.sec_fundamentals import get_sec_fundamentals_provider
 
     try:
-        return get_fundamentals_cached(provider, symbol)
+        return get_fundamentals_cached(get_sec_fundamentals_provider(), symbol)
     except MarketDataError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -175,10 +176,12 @@ def get_fundamentals(
 def get_news(
     symbol: str,
     limit: int = Query(default=10, gt=0, le=50),
-    provider: MarketDataProvider = Depends(get_market_data_provider),
 ):
+    # Company news comes from Finnhub (cached + rate-limited in the adapter).
+    from catalystiq.providers.finnhub_news import get_finnhub_news_provider
+
     try:
-        return provider.get_news(symbol, limit=limit)
+        return get_finnhub_news_provider().get_news(symbol, limit=limit)
     except MarketDataError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
