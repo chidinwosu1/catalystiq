@@ -162,24 +162,37 @@ export default function TradeCenterPage({
 }: TradeCenterPageProps) {
   const [candidates, setCandidates] = useState<OpportunityScore[] | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [scanStatus, setScanStatus] = useState<OpportunityScan["status"]>("ok");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // The symbol whose Entry Check pop-out is open (null = closed).
   const [entryCheckSymbol, setEntryCheckSymbol] = useState<string | null>(null);
 
-  // The backend serves the scan from a warm cache and returns a fast "warming
-  // up" placeholder (empty candidates + a warming note) when it's cold, rather
-  // than blocking the request on a multi-second cold scan. So we never hang on
-  // the spinner; instead, when we get the warming placeholder, we poll (bypassing
-  // the 30s share cache) until the background warm fills in real candidates.
+  // The backend serves the scan from a warm cache and returns a fast placeholder
+  // when it's cold (status "warming") or when the upstream data provider is
+  // temporarily throttled (status "unavailable") — rather than blocking the
+  // request on a multi-second cold scan. Both are TRANSIENT: the background scan
+  // keeps working, so we poll (bypassing the 30s share cache) with backoff until
+  // real candidates fill in. Crucially we do NOT give up after a fixed number of
+  // attempts — a cold container's first scan of the whole universe can take
+  // longer than that, and a rate-limit lifts on its own; a bounded poll would
+  // strand the page on the placeholder until a manual reload.
   useEffect(() => {
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let attempts = 0;
-    const MAX_ATTEMPTS = 24; // ~2 min at 5s spacing
+    let delay = 5000; // starts at 5s, backs off toward MAX_DELAY
+    const MAX_DELAY = 30_000;
 
-    const isWarming = (scan: OpportunityScan) =>
-      scan.candidates.length === 0 && !!scan.note && /warming/i.test(scan.note);
+    const isTransient = (scan: OpportunityScan) => {
+      if (scan.status) return scan.status === "warming" || scan.status === "unavailable";
+      // Older backend without `status`: fall back to the warming-note heuristic.
+      return scan.candidates.length === 0 && !!scan.note && /warming/i.test(scan.note);
+    };
+
+    const scheduleRetry = () => {
+      timer = setTimeout(() => load(false), delay); // non-shared so we see fresh state
+      delay = Math.min(Math.round(delay * 1.5), MAX_DELAY);
+    };
 
     const load = (useShared: boolean) => {
       (useShared ? getOpportunityScanShared(4) : getOpportunityScan(4))
@@ -187,16 +200,18 @@ export default function TradeCenterPage({
           if (!alive) return;
           setCandidates(scan.candidates);
           setNote(scan.note);
+          setScanStatus(scan.status ?? "ok");
+          setError(null);
           setLoading(false);
-          if (isWarming(scan) && attempts < MAX_ATTEMPTS) {
-            attempts += 1;
-            timer = setTimeout(() => load(false), 5000); // non-shared so we see fresh state
-          }
+          if (isTransient(scan)) scheduleRetry();
         })
         .catch((e) => {
           if (!alive) return;
+          // A transient network / 5xx during a cold start shouldn't strand the
+          // page: surface it but keep retrying with backoff so it self-recovers.
           setError(e instanceof ApiError ? e.message : "Could not load candidates.");
           setLoading(false);
+          scheduleRetry();
         });
     };
 
@@ -263,7 +278,11 @@ export default function TradeCenterPage({
 
         {!loading && !error && candidates && candidates.length === 0 && (
           <div className="flex items-start gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-ink-secondary">
-            <Info size={14} className="mt-0.5 shrink-0" />
+            {scanStatus === "warming" || scanStatus === "unavailable" ? (
+              <Loader2 size={14} className="mt-0.5 shrink-0 animate-spin" />
+            ) : (
+              <Info size={14} className="mt-0.5 shrink-0" />
+            )}
             <span>{note ?? "No symbols currently meet the rule-based eligibility criteria."}</span>
           </div>
         )}

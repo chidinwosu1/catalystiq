@@ -239,9 +239,46 @@ def test_scan_ranks_eligible_and_never_mock_fills(client, test_db_session):
     scores = [c["score"] for c in body["candidates"]]
     assert scores == sorted(scores, reverse=True)
     assert body["ml"]["status"] == "not_available"
+    # A real scan with candidates is tagged status "ok".
+    assert body["status"] == "ok"
     # Every candidate is a real, available rule-based score.
     for c in body["candidates"]:
         assert c["status"] == "available" and c["score_type"] == "rule_based"
+
+
+def test_scan_reports_unavailable_when_universe_is_rate_limited(client, test_db_session):
+    # When the upstream provider rate-limits the WHOLE universe, 0 candidates is
+    # a data outage - not "nothing qualifies". The scan must say so (status
+    # "unavailable" + a retry note) so the UI keeps polling instead of showing a
+    # misleading "no symbols meet criteria" (or an eternal "warming up").
+    from catalystiq.main import app
+    from catalystiq.providers.market_data import MarketDataError, get_market_data_provider
+    from catalystiq.schemas.market_data import Quote
+
+    class _ThrottledProvider:
+        def get_ohlcv(self, symbol, start, end=None, interval="1d"):
+            raise MarketDataError(f"Failed to fetch OHLCV for {symbol}: 429 Too Many Requests")
+
+        def get_quote(self, symbol):
+            return Quote(symbol=symbol.upper(), price=1.0, previous_close=1.0,
+                         as_of=dt.datetime.now(dt.timezone.utc))
+
+        def get_fundamentals(self, symbol):
+            raise AssertionError("scan must not fetch fundamentals")
+
+        def get_news(self, symbol, limit=10):
+            return []
+
+    app.dependency_overrides[get_market_data_provider] = lambda: _ThrottledProvider()
+    try:
+        r = client.get("/analysis/opportunity-scan", params={"top": 4, "symbols": "NVDA,AAPL"})
+    finally:
+        del app.dependency_overrides[get_market_data_provider]
+    assert r.status_code == 200
+    body = r.json()
+    assert body["candidates"] == []
+    assert body["status"] == "unavailable"
+    assert body["note"] and "rate-limit" in body["note"].lower()
 
 
 def test_opportunity_score_does_not_import_fred():

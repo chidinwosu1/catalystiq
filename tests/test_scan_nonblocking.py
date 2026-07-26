@@ -26,7 +26,7 @@ from catalystiq.schemas.opportunity import OpportunityScan
 NOW = dt.datetime(2026, 1, 2, tzinfo=dt.timezone.utc)
 
 
-def _fake_scan(note: str) -> OpportunityScan:
+def _fake_scan(note: str, status: str = "ok") -> OpportunityScan:
     return OpportunityScan(
         as_of=NOW,
         formula_version="test",
@@ -36,6 +36,7 @@ def _fake_scan(note: str) -> OpportunityScan:
         candidates=[],
         ml=ops._ML_NOT_AVAILABLE,
         note=note,
+        status=status,
     )
 
 
@@ -92,3 +93,37 @@ def test_single_flight_does_not_double_start(_isolated):
     scan = scan_universe_fast(NOW, top=4, ttl_seconds=1800)
     assert scan.note and "warming" in scan.note.lower()
     assert starts == []  # not started again while one is in flight
+
+
+def test_warming_placeholder_status(_isolated):
+    # The cold-cache placeholder is machine-tagged "warming" so the client can
+    # keep polling without parsing the note text.
+    scan = scan_universe_fast(NOW, top=4, ttl_seconds=1800)
+    assert scan.status == "warming"
+
+
+def test_unavailable_cache_is_rewarmed_even_when_fresh(_isolated):
+    # A cached "unavailable" scan is a transient data outage, not a durable
+    # answer: the next request must re-kick a (single-flight) background scan
+    # even while the entry is nominally fresh, so the page recovers as soon as
+    # the upstream throttle lifts - instead of waiting out the cache TTL.
+    starts = _isolated
+    with _SCAN_CACHE_LOCK:
+        _SCAN_CACHE[_key()] = _ScanCacheEntry(
+            scan=_fake_scan("Market data is temporarily unavailable", status="unavailable"),
+            stored_at=100.0,
+        )
+    scan = scan_universe_fast(NOW, top=4, ttl_seconds=1800, monotonic=lambda: 200.0)
+    assert scan.status == "unavailable"  # serves the (stale) outage result now
+    assert starts == [_key()]  # and re-warms in the background
+
+
+def test_fresh_ok_cache_is_not_rewarmed(_isolated):
+    # An "ok" scan (candidates, or a genuine "nothing qualifies") is a real
+    # answer and must NOT trigger a needless re-warm while fresh.
+    starts = _isolated
+    with _SCAN_CACHE_LOCK:
+        _SCAN_CACHE[_key()] = _ScanCacheEntry(scan=_fake_scan("REAL", status="ok"), stored_at=100.0)
+    scan = scan_universe_fast(NOW, top=4, ttl_seconds=1800, monotonic=lambda: 200.0)
+    assert scan.note == "REAL"
+    assert starts == []

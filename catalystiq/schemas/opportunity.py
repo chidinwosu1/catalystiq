@@ -72,3 +72,11 @@ class OpportunityScan(BaseModel):
     candidates: list[OpportunityScore]  # ranked by score desc, len <= top
     ml: MlStatus
     note: str | None = None
+    # Machine-readable state so the client can act without parsing ``note``:
+    #   "ok"          - a real scan (candidates, or a genuine "nothing qualifies")
+    #   "warming"     - the first scan is still computing in the background
+    #   "unavailable" - the scan ran but market data could not be fetched for the
+    #                   universe (e.g. the upstream provider is rate-limiting), so
+    #                   0 candidates reflects a data outage, NOT true ineligibility
+    # Defaults to "ok" for backward compatibility with existing serialized scans.
+    status: str = "ok"

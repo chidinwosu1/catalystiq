@@ -20,7 +20,7 @@ from __future__ import annotations
 import datetime as dt
 
 from catalystiq.providers.fundamentals_cache import is_rate_limited_error
-from catalystiq.providers.market_data import MarketDataProvider
+from catalystiq.providers.market_data import MarketDataError, MarketDataProvider
 from catalystiq.schemas.market_data import (
     FundamentalsSnapshot,
     IntradayBar,
@@ -55,8 +55,19 @@ class FallbackMarketDataProvider(MarketDataProvider):
             secondary_fn = getattr(self._secondary, method, None)
             if not callable(secondary_fn):
                 raise
-            # Let the secondary's own error (incl. its rate limit) propagate.
-            return secondary_fn(*args, **kwargs)
+            try:
+                return secondary_fn(*args, **kwargs)
+            except MarketDataError:
+                raise  # already the pipeline's expected type
+            except Exception as sec_exc:
+                # Normalize a secondary-specific failure (e.g. Twelve Data raises
+                # its own ProviderError, which is a *sibling* of MarketDataError,
+                # not a subclass) into MarketDataError. Otherwise it escapes the
+                # daily pipeline / universe scan's `except MarketDataError` and
+                # crashes the whole scan instead of just skipping the symbol.
+                raise MarketDataError(
+                    f"fallback secondary {method} failed: {sec_exc}"
+                ) from sec_exc
 
     # -- price / quote: fail over on throttle --------------------------------
 

@@ -239,11 +239,35 @@ class YahooFinanceProvider(MarketDataProvider):
         return items
 
 
+def _build_fallback_secondary(name: str) -> MarketDataProvider | None:
+    """Build the failover secondary named by ``market_data_fallback_provider``,
+    or return None when it can't be constructed (missing credentials / API key)
+    so the caller keeps the bare primary. Supported names:
+
+      "webull"      - Webull OpenAPI Market Data (serves daily d1 bars + quotes;
+                      reuses the existing Webull app credentials).
+      "twelve_data" - Twelve Data (proper daily OHLCV; free-tier API key, credit-
+                      gated at 8/min · 800/day - enough for the ~24-symbol scan).
+
+    Both provide the OHLCV/quote calls the daily scan fails over; neither serves
+    fundamentals/news, which the wrapper keeps on the primary."""
+    try:
+        if name == "webull":
+            return get_webull_market_data_provider()
+        if name == "twelve_data":
+            from catalystiq.providers.twelve_data import get_twelve_data_provider
+
+            return get_twelve_data_provider()
+    except Exception:  # missing creds / API key / SDK - skip failover
+        return None
+    return None
+
+
 def get_market_data_provider() -> MarketDataProvider:
     """Factory returning the configured MarketDataProvider (§config.market_data_provider).
 
-    When ``market_data_fallback_provider`` is set (and its credentials are
-    available), the primary is wrapped in a FallbackMarketDataProvider that
+    When ``market_data_fallback_provider`` names a secondary (and its credentials
+    are available), the primary is wrapped in a FallbackMarketDataProvider that
     fails OHLCV/quote calls over to the secondary ONLY on an upstream rate limit
     - so a Yahoo throttle no longer empties the universe scan. The wrap is
     defensive: if the secondary can't be built it is skipped and the bare
@@ -258,14 +282,12 @@ def get_market_data_provider() -> MarketDataProvider:
         raise ValueError(f"Unknown market data provider: {provider_name}")
 
     fallback = (settings.market_data_fallback_provider or "").strip().lower()
-    if fallback == "webull":
-        try:
-            secondary = get_webull_market_data_provider()
-        except Exception:  # missing creds / SDK - skip failover, keep primary
-            return primary
-        from catalystiq.providers.fallback_market_data import FallbackMarketDataProvider
+    if fallback:
+        secondary = _build_fallback_secondary(fallback)
+        if secondary is not None:
+            from catalystiq.providers.fallback_market_data import FallbackMarketDataProvider
 
-        return FallbackMarketDataProvider(primary, secondary)
+            return FallbackMarketDataProvider(primary, secondary)
     return primary
 
 

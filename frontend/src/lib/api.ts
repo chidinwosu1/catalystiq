@@ -555,6 +555,9 @@ export interface OpportunityScan {
   candidates: OpportunityScore[];
   ml: { status: string; reason: string };
   note: string | null;
+  // "ok" | "warming" | "unavailable". Older backends omit it; treat missing as
+  // "ok" so a scan with candidates always renders.
+  status?: "ok" | "warming" | "unavailable";
 }
 
 /** Ranked rule-based candidates from a curated universe scan (top N). */
