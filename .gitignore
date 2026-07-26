@@ -226,3 +226,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local dev / test SQLite database
+catalystiq.db
+*.db-journal

@@ -460,12 +460,15 @@ def scan_universe(provider, db, now: dt.datetime, top: int = 4, universe=None) -
     the eligible (status=available) ones, rank by score desc, and return the top
     N. A symbol whose data can't be fetched or isn't eligible is skipped - it is
     NEVER replaced with mock or fabricated data."""
+    from catalystiq.providers.fundamentals_cache import is_rate_limited_error
     from catalystiq.providers.market_data import MarketDataError
 
     symbols = tuple(universe) if universe else SCAN_UNIVERSE
     top = max(0, min(top, _MAX_SCAN_TOP))
 
     eligible: list[OpportunityScore] = []
+    fetch_failures = 0  # symbols whose market data could not be fetched at all
+    rate_limited = False  # any fetch failure that looked like an upstream 429
     for symbol in symbols:
         try:
             # allow_fundamentals_lookup=False: the scan resolves sector from
@@ -473,8 +476,13 @@ def scan_universe(provider, db, now: dt.datetime, top: int = 4, universe=None) -
             # call. A symbol with no governed sector degrades to
             # insufficient_data (skipped below), never a fabricated sector.
             result = score_symbol(symbol, provider, db, now, allow_fundamentals_lookup=False)
-        except MarketDataError:
-            continue  # unfetchable -> skip, never mock-fill
+        except MarketDataError as exc:
+            # Unfetchable -> skip, never mock-fill. Track it so a universe-wide
+            # data outage is reported honestly (as "unavailable") rather than
+            # masquerading as "no symbols currently qualify".
+            fetch_failures += 1
+            rate_limited = rate_limited or is_rate_limited_error(exc)
+            continue
         if result.status == "available" and result.score is not None:
             eligible.append(result)
 
@@ -486,6 +494,29 @@ def scan_universe(provider, db, now: dt.datetime, top: int = 4, universe=None) -
     # the intraday fetch never delays a card appearing. Each candidate carries
     # entry_quality=None; the card fills it in on first poll.
     candidates = eligible[:top]
+
+    # Decide status/note honestly. An empty result has two very different
+    # causes: (a) the whole universe was unfetchable (a provider/data outage -
+    # e.g. Yahoo rate-limiting the shared egress), or (b) data WAS fetched but
+    # nothing currently clears the bar. Reporting (a) as "no symbols qualify"
+    # is misleading, so a universe-wide fetch failure is surfaced as
+    # "unavailable" with a note the UI can retry on.
+    status = "ok"
+    note: str | None = None
+    if not eligible:
+        data_outage = symbols and fetch_failures * 2 >= len(symbols)
+        if data_outage:
+            status = "unavailable"
+            note = (
+                "Market data is temporarily rate-limited by the upstream provider; "
+                "the scan will keep retrying automatically."
+                if rate_limited
+                else "Market data is temporarily unavailable; the scan will keep "
+                "retrying automatically."
+            )
+        else:
+            note = "No symbols currently meet the rule-based eligibility criteria."
+
     return OpportunityScan(
         as_of=now if now.tzinfo else now.replace(tzinfo=dt.timezone.utc),
         formula_version=FORMULA_VERSION,
@@ -494,7 +525,8 @@ def scan_universe(provider, db, now: dt.datetime, top: int = 4, universe=None) -
         top=top,
         candidates=candidates,
         ml=_ML_NOT_AVAILABLE,
-        note=None if eligible else "No symbols currently meet the rule-based eligibility criteria.",
+        note=note,
+        status=status,
     )
 
 
@@ -603,6 +635,7 @@ def _warming_scan(now: dt.datetime, top: int, symbols: tuple[str, ...]) -> Oppor
         candidates=[],
         ml=_ML_NOT_AVAILABLE,
         note="Opportunity setups are warming up — check back in a moment.",
+        status="warming",
     )
 
 
@@ -668,7 +701,13 @@ def scan_universe_fast(
         is_fresh = (
             entry is not None and ttl_seconds > 0 and (monotonic() - entry.stored_at) < ttl_seconds
         )
-        needs_warm = entry is None or not is_fresh
+        # A cached "unavailable" scan is a data outage (e.g. the provider was
+        # rate-limiting the whole universe), not a durable answer. Re-warm it on
+        # the next request even while nominally fresh so the Trade Center
+        # recovers within a poll or two of the throttle lifting - instead of
+        # waiting out the cache TTL (or the slower background warmer cycle).
+        entry_unavailable = entry is not None and getattr(entry.scan, "status", "ok") == "unavailable"
+        needs_warm = entry is None or not is_fresh or entry_unavailable
         should_start = needs_warm and key not in _SCAN_INFLIGHT
         if should_start:
             _SCAN_INFLIGHT.add(key)
