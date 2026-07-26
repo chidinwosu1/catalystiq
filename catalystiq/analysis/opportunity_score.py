@@ -372,10 +372,15 @@ def _resolve_sector_etf(symbol, provider, allow_fundamentals_lookup: bool) -> st
         return etf
     if not allow_fundamentals_lookup:
         return None
+    # Non-universe symbol without a governed sector: resolve it from the
+    # dedicated SEC EDGAR fundamentals provider (through the governed cache),
+    # NOT the price provider - the Webull/Twelve Data price chain does not serve
+    # fundamentals. Still best-effort: any failure degrades to no sector.
     from catalystiq.providers.fundamentals_cache import get_fundamentals_cached
+    from catalystiq.providers.sec_fundamentals import get_sec_fundamentals_provider
 
     try:
-        sector_name = get_fundamentals_cached(provider, symbol).sector
+        sector_name = get_fundamentals_cached(get_sec_fundamentals_provider(), symbol).sector
     except MarketDataError:
         return None
     return SECTOR_ETF_MAP.get(sector_name) if sector_name else None
@@ -645,12 +650,12 @@ def _run_background_scan(top: int, universe, key: tuple, monotonic=_time.monoton
     in-flight marker, even on failure, so a later request can retry."""
     try:
         from catalystiq.db.base import SessionLocal
-        from catalystiq.providers.market_data import get_market_data_provider
+        from catalystiq.providers.market_data import get_scan_market_data_provider
 
         db = SessionLocal()
         try:
             scan = scan_universe(
-                get_market_data_provider(),
+                get_scan_market_data_provider(),
                 db,
                 dt.datetime.now(dt.timezone.utc),
                 top=top,

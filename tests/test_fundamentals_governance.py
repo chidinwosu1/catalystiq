@@ -107,13 +107,15 @@ def test_default_universe_scan_makes_zero_fundamentals_calls(client):
 
 
 def test_fundamentals_endpoint_served_through_cache(client):
+    from catalystiq.routers.market_data import get_fundamentals_source
+
     provider = _CountingProvider()
-    app.dependency_overrides[get_market_data_provider] = lambda: provider
+    app.dependency_overrides[get_fundamentals_source] = lambda: provider
     try:
         r1 = client.get("/market-data/fundamentals/NVDA")
         r2 = client.get("/market-data/fundamentals/NVDA")
     finally:
-        del app.dependency_overrides[get_market_data_provider]
+        del app.dependency_overrides[get_fundamentals_source]
 
     assert r1.status_code == 200 and r2.status_code == 200
     assert r1.json()["symbol"] == "NVDA"
@@ -142,8 +144,13 @@ class _QuoteOkFundamentalsRateLimited:
 
 
 def test_quote_loads_even_when_fundamentals_is_rate_limited(client):
+    from catalystiq.routers.market_data import get_fundamentals_source
+
     provider = _QuoteOkFundamentalsRateLimited()
+    # Quote is served by the price provider; fundamentals by its own (SEC) source.
+    # Point both at the split fake so the fundamentals call is the rate-limited one.
     app.dependency_overrides[get_market_data_provider] = lambda: provider
+    app.dependency_overrides[get_fundamentals_source] = lambda: provider
     try:
         r_quote = client.get("/market-data/quote/NVDA")
         r_fund = client.get("/market-data/fundamentals/NVDA")
@@ -152,6 +159,7 @@ def test_quote_loads_even_when_fundamentals_is_rate_limited(client):
         r_quote_again = client.get("/market-data/quote/NVDA")
     finally:
         del app.dependency_overrides[get_market_data_provider]
+        del app.dependency_overrides[get_fundamentals_source]
 
     assert r_quote.status_code == 200
     assert r_quote.json()["price"] == 123.45

@@ -53,7 +53,7 @@ def test_diagnostics_healthy(client, monkeypatch):
     import catalystiq.providers.market_data as m
     from catalystiq.main import app
 
-    monkeypatch.setattr(m, "get_market_data_provider", lambda: _HealthyProvider())
+    monkeypatch.setattr(m, "get_scan_market_data_provider", lambda: _HealthyProvider())
     monkeypatch.setattr(m, "get_intraday_market_data_provider", lambda: _HealthyProvider())
 
     r = client.get("/analysis/diagnostics/market-data")
@@ -69,7 +69,7 @@ def test_diagnostics_healthy(client, monkeypatch):
 def test_diagnostics_detects_rate_limit(client, monkeypatch):
     import catalystiq.providers.market_data as m
 
-    monkeypatch.setattr(m, "get_market_data_provider", lambda: _RateLimitedProvider())
+    monkeypatch.setattr(m, "get_scan_market_data_provider", lambda: _RateLimitedProvider())
     monkeypatch.setattr(m, "get_intraday_market_data_provider", lambda: _RateLimitedProvider())
 
     r = client.get("/analysis/diagnostics/market-data")
@@ -88,7 +88,7 @@ def test_diagnostics_reports_provider_construction_failure(client, monkeypatch):
     def _boom():
         raise RuntimeError("yfinance not installed")
 
-    monkeypatch.setattr(m, "get_market_data_provider", _boom)
+    monkeypatch.setattr(m, "get_scan_market_data_provider", _boom)
     monkeypatch.setattr(m, "get_intraday_market_data_provider", lambda: _HealthyProvider())
 
     r = client.get("/analysis/diagnostics/market-data")
@@ -102,13 +102,13 @@ def test_diagnostics_reports_provider_construction_failure(client, monkeypatch):
 def test_diagnostics_reports_config_and_scan_cache(client, monkeypatch):
     import catalystiq.providers.market_data as m
 
-    monkeypatch.setattr(m, "get_market_data_provider", lambda: _HealthyProvider())
+    monkeypatch.setattr(m, "get_scan_market_data_provider", lambda: _HealthyProvider())
     monkeypatch.setattr(m, "get_intraday_market_data_provider", lambda: _HealthyProvider())
 
     r = client.get("/analysis/diagnostics/market-data")
     body = r.json()
     assert set(body["config"]) == {
-        "market_data_provider",
+        "market_data_primary_provider",
         "market_data_fallback_provider",
         "intraday_market_data_provider",
         "webull_market_data_configured",

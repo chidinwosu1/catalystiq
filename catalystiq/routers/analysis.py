@@ -100,7 +100,9 @@ def get_opportunity_scan(
     now = dt.datetime.now(dt.timezone.utc)
     if symbols:
         # Explicit ad-hoc universe: no background warmer backs it, so compute
-        # inline (cached) as before.
+        # inline (cached) as before. `provider` is the price chain (Webull ->
+        # Twelve Data) - get_market_data_provider() now returns it - so an ad-hoc
+        # scan never touches Yahoo either.
         universe = [s.strip().upper() for s in symbols.split(",") if s.strip()]
         return scan_universe_cached(provider, db, now=now, top=top, universe=universe)
     # Default universe: never block the request on a cold scan. Serve cache (even
@@ -206,12 +208,15 @@ def get_market_data_diagnostics(
     from catalystiq.config import get_settings
     from catalystiq.providers.market_data import (
         get_intraday_market_data_provider,
-        get_market_data_provider,
+        get_scan_market_data_provider,
     )
     from catalystiq.providers.market_data_gate import market_data_gate_stats
 
     settings = get_settings()
-    daily = _probe_provider(get_market_data_provider, symbol, intraday=False)
+    # Probe the SAME price chain the scan/warmer use (primary -> fallback), not
+    # the global provider, so the diagnostic reflects what actually feeds the
+    # Trade Center.
+    daily = _probe_provider(get_scan_market_data_provider, symbol, intraday=False)
     intraday = _probe_provider(get_intraday_market_data_provider, symbol, intraday=True)
     scan_cache = scan_cache_debug()
 
@@ -221,9 +226,9 @@ def get_market_data_diagnostics(
         for s in market_data_gate_stats().values()
     ):
         summary = (
-            "Upstream rate limit detected on the daily provider - the scan can't "
-            "fetch history, so no candidates appear. This is a provider (Yahoo) "
-            "per-IP throttle, not the Entry Check code."
+            "Upstream rate limit detected on the scan price provider - the scan "
+            "can't fetch history, so no candidates appear. This is a provider "
+            "per-IP/plan throttle, not the Entry Check code."
         )
     elif not daily.ok:
         summary = f"Daily provider unreachable ({daily.detail}); the scan cannot produce candidates."
@@ -240,7 +245,7 @@ def get_market_data_diagnostics(
     return MarketDataDiagnostics(
         checked_at=dt.datetime.now(dt.timezone.utc),
         config={
-            "market_data_provider": settings.market_data_provider,
+            "market_data_primary_provider": settings.market_data_primary_provider,
             "market_data_fallback_provider": settings.market_data_fallback_provider or None,
             "intraday_market_data_provider": settings.intraday_market_data_provider,
             "webull_market_data_configured": bool(

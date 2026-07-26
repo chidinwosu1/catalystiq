@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Activity,
   ArrowRight,
@@ -22,8 +22,6 @@ import {
   Users,
 } from "lucide-react";
 import SignalNetwork from "../components/home/SignalNetwork";
-import { type QuoteResult } from "../lib/api";
-import { useLiveQuotes } from "../lib/liveData";
 import type { PageId } from "../types/nav";
 
 interface HomePageProps {
@@ -58,45 +56,6 @@ function useRevealOnScroll() {
     return () => io.disconnect();
   }, []);
   return rootRef;
-}
-
-// Live ticker: label -> Yahoo symbol. `pct` marks a rate (10Y yield) shown
-// with a % suffix. Values are fetched live; nothing here is hardcoded.
-const TICKER_SYMBOLS: { label: string; symbol: string; pct?: boolean }[] = [
-  { label: "S&P 500", symbol: "^GSPC" },
-  { label: "NASDAQ", symbol: "^IXIC" },
-  { label: "VIX", symbol: "^VIX" },
-  { label: "10Y", symbol: "^TNX", pct: true },
-  { label: "NVDA", symbol: "NVDA" },
-  { label: "AVGO", symbol: "AVGO" },
-  { label: "UNH", symbol: "UNH" },
-  { label: "Gold", symbol: "GC=F" },
-  { label: "WTI", symbol: "CL=F" },
-  { label: "BTC", symbol: "BTC-USD" },
-];
-
-interface TickerRow {
-  label: string;
-  value: string; // formatted, or "—" when unavailable
-  change: string | null; // e.g. "+0.4%", or null when unavailable
-  dir: "up" | "dn" | "flat";
-}
-
-function buildTickerRows(quotes: QuoteResult[]): TickerRow[] {
-  const bySymbol = new Map(quotes.map((q) => [q.symbol.toUpperCase(), q]));
-  return TICKER_SYMBOLS.map(({ label, symbol, pct }) => {
-    const q = bySymbol.get(symbol.toUpperCase());
-    if (!q || q.status !== "ok" || q.price === null) {
-      return { label, value: "—", change: null, dir: "flat" as const };
-    }
-    const value = pct
-      ? `${q.price.toFixed(2)}%`
-      : q.price.toLocaleString(undefined, { maximumFractionDigits: 2 });
-    const cp = q.change_pct;
-    const change = cp === null ? null : `${cp >= 0 ? "+" : ""}${cp.toFixed(2)}%`;
-    const dir = cp === null || cp === 0 ? "flat" : cp > 0 ? "up" : "dn";
-    return { label, value, change, dir: dir as "up" | "dn" | "flat" };
-  });
 }
 
 interface Offer {
@@ -235,17 +194,6 @@ const secTitle =
 export default function HomePage({ onNavigate }: HomePageProps) {
   const rootRef = useRevealOnScroll();
 
-  // Live market ticker (real quotes; "—" for anything unavailable). Shared 15s
-  // live cache — reused by any other view showing these same symbols.
-  const tickerQuotes = useLiveQuotes(TICKER_SYMBOLS.map((t) => t.symbol));
-  const tickerRows = useMemo<TickerRow[]>(
-    () =>
-      tickerQuotes.data
-        ? buildTickerRows(tickerQuotes.data)
-        : TICKER_SYMBOLS.map((t) => ({ label: t.label, value: "—", change: null, dir: "flat" })),
-    [tickerQuotes.data]
-  );
-
   const quickActions: { title: string; detail: string; icon: typeof LineChart; page: PageId }[] = [
     { title: "Start New Analysis", detail: "Research any ticker in depth.", icon: LineChart, page: "analysis" },
     { title: "Today's Opportunities", detail: "See the highest-conviction setups.", icon: Search, page: "analysis" },
@@ -264,30 +212,6 @@ export default function HomePage({ onNavigate }: HomePageProps) {
       </div>
 
       <div className="relative z-[1]">
-      {/* ===================== TICKER (top) ===================== */}
-      <div className="overflow-hidden border-b border-border bg-page">
-        <div className="flex w-max cq-marquee gap-9 py-2 font-mono text-[12.5px] text-ink-secondary">
-          {[...tickerRows, ...tickerRows].map((t, i) => (
-            <span key={i} className="inline-flex items-center gap-1.5 whitespace-nowrap">
-              <b className="font-semibold text-ink-primary">{t.label}</b> {t.value}{" "}
-              {t.change && (
-                <span
-                  className={
-                    t.dir === "up"
-                      ? "text-status-good"
-                      : t.dir === "dn"
-                        ? "text-status-critical"
-                        : "text-ink-muted"
-                  }
-                >
-                  {t.change}
-                </span>
-              )}
-            </span>
-          ))}
-        </div>
-      </div>
-
       {/* ===================== HERO (compact) ===================== */}
       <header className="relative overflow-hidden">
         <SignalNetwork />

@@ -50,13 +50,16 @@ async def lifespan(app: FastAPI):
     # ingest inline (catalystiq/pipelines/universe_warmer.py).
     if settings.enable_universe_warmer:
         from catalystiq.pipelines.universe_warmer import universe_warm_loop
-        from catalystiq.providers.market_data import get_market_data_provider
+        from catalystiq.providers.market_data import get_scan_market_data_provider
 
         tasks.append(
             asyncio.create_task(
                 universe_warm_loop(
                     SessionLocal,
-                    get_market_data_provider,
+                    # Warm Silver + precompute the scan through the SAME Webull ->
+                    # Twelve Data price chain the request path uses, so the
+                    # Trade Center never falls back to Yahoo for the scan.
+                    get_scan_market_data_provider,
                     settings.universe_warm_interval_seconds,
                 )
             )

@@ -10,10 +10,11 @@ def test_list_data_sources(client):
     resp = client.get("/data-sources")
     assert resp.status_code == 200
     names = {row["name"] for row in resp.json()}
-    assert {"yahoo", "fred", "sec_edgar", "finra", "twelve_data", "webull"} <= names
-    # Yahoo is keyless and always enabled.
-    yahoo = [r for r in resp.json() if r["name"] == "yahoo"][0]
-    assert yahoo["enabled"] is True
+    assert {"fred", "sec_edgar", "finra", "twelve_data", "webull", "finnhub"} <= names
+    assert "yahoo" not in names  # Yahoo fully removed
+    # NYSE is keyless and always enabled.
+    nyse = [r for r in resp.json() if r["name"] == "nyse"][0]
+    assert nyse["enabled"] is True
 
 
 def test_provider_health_reports_missing_settings_names_only(client):
@@ -67,27 +68,28 @@ def test_health_reports_last_fetched_for_on_demand_source(client):
     from catalystiq.providers import fetch_tracker
 
     fetch_tracker.reset()
-    # Yahoo has no fetch recorded yet -> null (an honest blank, not staleness).
-    body = client.get("/data-sources/yahoo/health").json()
+    # Webull (on-demand price source) has no fetch recorded yet -> null (an
+    # honest blank, not staleness).
+    body = client.get("/data-sources/webull/health").json()
     assert body["last_fetched_at"] is None
 
     now = dt.datetime(2026, 7, 19, 15, 0, 0, tzinfo=dt.timezone.utc)
-    fetch_tracker.record_fetch("yahoo", when=now)
-    body = client.get("/data-sources/yahoo/health").json()
+    fetch_tracker.record_fetch("webull", when=now)
+    body = client.get("/data-sources/webull/health").json()
     assert body["last_fetched_at"] is not None
     assert body["last_fetched_at"].startswith("2026-07-19T15:00:00")
     fetch_tracker.reset()
 
 
 def test_recording_a_quote_fetch_populates_last_fetched():
-    # The Yahoo adapter records a successful fetch through the shared tracker;
+    # A price adapter records a successful fetch through the shared tracker;
     # verify the wiring without hitting the network.
     from catalystiq.providers import fetch_tracker
 
     fetch_tracker.reset()
-    assert fetch_tracker.get_last_fetch("yahoo") is None
-    fetch_tracker.record_fetch("yahoo")
-    assert fetch_tracker.get_last_fetch("yahoo") is not None
+    assert fetch_tracker.get_last_fetch("webull") is None
+    fetch_tracker.record_fetch("webull")
+    assert fetch_tracker.get_last_fetch("webull") is not None
     fetch_tracker.reset()
 
 
