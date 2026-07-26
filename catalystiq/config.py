@@ -104,10 +104,15 @@ class Settings(BaseSettings):
     # Optional failover for the daily price/quote path. When the primary
     # (Yahoo) is RATE-LIMITED on an OHLCV/quote call, retry that call against
     # this secondary so the universe scan still produces candidates instead of
-    # an empty "warming up" Trade Center. "webull" uses Webull OpenAPI Market
-    # Data via the existing Webull app credentials. Empty (default) = no
-    # failover. Fundamentals/news never fail over (secondary lacks them).
-    market_data_fallback_provider: str = ""  # "" | "webull"
+    # an empty "warming up" Trade Center. Empty (default) = no failover.
+    #   "webull"      - Webull OpenAPI Market Data (daily bars + quotes) via the
+    #                   existing Webull app credentials.
+    #   "twelve_data" - Twelve Data (daily OHLCV) via TWELVE_DATA_API_KEY; the
+    #                   free tier's credit budget covers the ~24-symbol scan.
+    # If the named secondary can't be built (missing creds/key) the failover is
+    # skipped and the bare primary is used. Fundamentals/news never fail over
+    # (neither secondary provides them).
+    market_data_fallback_provider: str = ""  # "" | "webull" | "twelve_data"
 
     # --- Intraday (Entry Check) market-data source -------------------------
     # The real-time Entry Quality / Entry Check feed is served by a DEDICATED
@@ -127,12 +132,6 @@ class Settings(BaseSettings):
     entry_check_cache_ttl_seconds: int = 10
 
     # --- Data-source integration (spec §2) ---------------------------
-    # Source priority for market data. Yahoo stays the initial primary
-    # historical source; Twelve Data is the optional secondary/validation
-    # source and is off unless explicitly enabled with a key.
-    market_data_primary_provider: str = "yahoo"
-    market_data_secondary_provider: str = "twelve_data"
-
     # Per-source enable flags. A source with no API key (Yahoo, NYSE) has no
     # flag - it's always available; these gate the rest.
     #
@@ -186,11 +185,6 @@ class Settings(BaseSettings):
     # above this (percent) between the primary and secondary provider raises
     # a data-quality warning. Values are never averaged.
     provider_comparison_tolerance_pct: float = 0.5
-
-    # Yahoo-outage fallback to the secondary market-data provider - only used
-    # when explicitly enabled (§5). Off by default; the primary is never
-    # silently replaced.
-    market_data_fallback_enabled: bool = False
 
     # --- Fundamentals fetch governance -------------------------------------
     # Fundamentals (Yahoo `.info`) are slow-changing and the endpoint is
@@ -411,7 +405,6 @@ def validate_settings(settings: "Settings | None" = None) -> None:
     # providers package (registry imports from providers.base only).
     from catalystiq.providers.registry import (
         SOURCE_REGISTRY,
-        get_source,
         is_source_enabled,
         missing_settings,
     )
@@ -439,16 +432,14 @@ def validate_settings(settings: "Settings | None" = None) -> None:
                 f"{', '.join(missing)}"
             )
 
-    # Primary/secondary market-data providers must name real market_data
-    # sources; a secondary that's named but disabled is fine (it just won't
-    # be used), but a typo'd/unknown name is a config error.
-    for role, name in (
-        ("MARKET_DATA_PRIMARY_PROVIDER", settings.market_data_primary_provider),
-        ("MARKET_DATA_SECONDARY_PROVIDER", settings.market_data_secondary_provider),
-    ):
-        source = get_source(name)
-        if source is None:
-            problems.append(f"{role}={name!r} is not a known data source")
+    # The daily-scan failover secondary, when configured, must name a provider
+    # the factory knows how to build; a typo'd/unknown name is a config error.
+    fallback_name = (settings.market_data_fallback_provider or "").strip().lower()
+    if fallback_name and fallback_name not in ("webull", "twelve_data"):
+        problems.append(
+            f"MARKET_DATA_FALLBACK_PROVIDER={fallback_name!r} is not a supported "
+            "failover secondary (expected '', 'webull', or 'twelve_data')"
+        )
 
     if problems:
         raise ConfigurationError(

@@ -56,10 +56,16 @@ def test_validation_error_never_contains_secret_values():
     assert secret not in str(exc.value)
 
 
-def test_unknown_primary_provider_is_a_config_error():
+def test_unknown_fallback_provider_is_a_config_error():
     with pytest.raises(ConfigurationError) as exc:
-        validate_settings(Settings(market_data_primary_provider="not_a_source"))
-    assert "MARKET_DATA_PRIMARY_PROVIDER" in str(exc.value)
+        validate_settings(Settings(market_data_fallback_provider="not_a_provider"))
+    assert "MARKET_DATA_FALLBACK_PROVIDER" in str(exc.value)
+
+
+def test_supported_fallback_providers_pass_validation():
+    # Both supported secondaries validate; an empty value (no failover) too.
+    for name in ("", "webull", "twelve_data"):
+        validate_settings(Settings(market_data_fallback_provider=name))
 
 
 def test_fully_configured_webull_passes():

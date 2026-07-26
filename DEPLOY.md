@@ -101,8 +101,13 @@ fail startup, so set the flag **and** its key together.
 | Webull (READ-ONLY) | `ENABLE_WEBULL=true`, `WEBULL_APP_KEY/SECRET/ACCOUNT_ID` |
 
 Tunables with sensible defaults: `SESSION_TTL_SECONDS` (43200),
-`SESSION_COOKIE_NAME` (`ciq_session`), `PROVIDER_COMPARISON_TOLERANCE_PCT`,
-`MARKET_DATA_FALLBACK_ENABLED`.
+`SESSION_COOKIE_NAME` (`ciq_session`), `PROVIDER_COMPARISON_TOLERANCE_PCT`.
+
+To keep the Trade Center populated when Yahoo rate-limits the shared egress,
+set `MARKET_DATA_FALLBACK_PROVIDER` to a failover secondary for the daily
+scan — `webull` (reuses `WEBULL_APP_KEY`/`SECRET`) or `twelve_data` (needs
+`TWELVE_DATA_API_KEY`; free tier covers the ~24-symbol universe). Empty
+(default) means no failover.
 
 ### Do NOT set (keeps the trading safeguards intact)
 `ENABLE_PAPER_ORDER_SUBMISSION`, `ENABLE_LIVE_ORDER_SUBMISSION`,

@@ -87,6 +87,20 @@ def test_rate_limit_fails_over_to_secondary():
     assert sec.calls == ["get_quote", "get_ohlcv", "get_intraday_ohlcv"]
 
 
+def test_secondary_non_market_data_error_is_normalized():
+    # A secondary that raises its OWN error type (e.g. Twelve Data's
+    # ProviderError, a sibling of MarketDataError - here simulated with a plain
+    # RuntimeError) must surface as MarketDataError so the daily pipeline / scan
+    # skip the symbol instead of the foreign exception crashing the whole scan.
+    class _BoomSecondary(_Secondary):
+        def get_ohlcv(self, symbol, start, end=None, interval="1d"):
+            raise RuntimeError("twelve-data provider error")
+
+    p = FallbackMarketDataProvider(_Primary(error=_RATE_LIMIT), _BoomSecondary())
+    with pytest.raises(MarketDataError):
+        p.get_ohlcv("AAPL", dt.date(2026, 7, 20))
+
+
 def test_non_rate_limit_error_is_not_masked():
     sec = _Secondary()
     boom = MarketDataError("No data for BADSYM")  # not a throttle
@@ -154,5 +168,38 @@ def test_factory_skips_fallback_when_secondary_unavailable(monkeypatch):
     monkeypatch.setattr(m, "get_webull_market_data_provider", _no_creds)
     provider = m.get_market_data_provider()
     # Degrades to the bare primary rather than raising.
+    assert isinstance(provider, _Primary)
+    get_settings.cache_clear()
+
+
+def test_factory_wraps_with_twelve_data_fallback(monkeypatch):
+    import catalystiq.providers.market_data as m
+    import catalystiq.providers.twelve_data as td
+    from catalystiq.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("MARKET_DATA_FALLBACK_PROVIDER", "twelve_data")
+    monkeypatch.setattr(m, "YahooFinanceProvider", lambda: _Primary())
+    monkeypatch.setattr(td, "get_twelve_data_provider", lambda: _Secondary())
+    provider = m.get_market_data_provider()
+    assert isinstance(provider, FallbackMarketDataProvider)
+    get_settings.cache_clear()
+
+
+def test_factory_skips_twelve_data_fallback_without_key(monkeypatch):
+    import catalystiq.providers.market_data as m
+    import catalystiq.providers.twelve_data as td
+    from catalystiq.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("MARKET_DATA_FALLBACK_PROVIDER", "twelve_data")
+    monkeypatch.setattr(m, "YahooFinanceProvider", lambda: _Primary())
+
+    def _no_key():
+        raise RuntimeError("Twelve Data api_key is not configured.")
+
+    monkeypatch.setattr(td, "get_twelve_data_provider", _no_key)
+    provider = m.get_market_data_provider()
+    # Missing key -> failover skipped, bare primary returned (never raises).
     assert isinstance(provider, _Primary)
     get_settings.cache_clear()
