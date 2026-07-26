@@ -103,3 +103,39 @@ def test_build_adapter_keyless_source_constructs():
     # (the price adapters need live credentials, exercised elsewhere).
     adapter = registry.build_adapter("nyse", Settings())
     assert adapter is not None
+
+
+def test_tradovate_registered_as_implemented_market_data_source():
+    src = registry.get_source("tradovate")
+    assert src is not None
+    assert src.domain is DataDomain.MARKET_DATA
+    assert src.implemented is True
+    assert src.enable_setting == "enable_tradovate"
+    assert set(src.required_settings) == {
+        "tradovate_username",
+        "tradovate_password",
+        "tradovate_cid",
+        "tradovate_sec",
+    }
+
+
+def test_build_tradovate_adapter_from_settings(monkeypatch):
+    settings = Settings(
+        enable_tradovate=True,
+        tradovate_username="u",
+        tradovate_password="p",
+        tradovate_cid="12345",
+        tradovate_sec="s",
+    )
+    # build_adapter gates on the passed settings, but the factory (like every
+    # other provider factory) constructs from the process-global get_settings();
+    # point that at the same object so the adapter actually builds.
+    monkeypatch.setattr("catalystiq.config.get_settings", lambda: settings)
+    adapter = registry.build_adapter("tradovate", settings)
+    assert adapter.PROVIDER_NAME == "tradovate"
+
+
+def test_build_tradovate_adapter_unconfigured_raises_config_error():
+    with pytest.raises(ProviderError) as exc:
+        registry.build_adapter("tradovate", Settings(enable_tradovate=True))
+    assert exc.value.category is ProviderErrorCategory.CONFIG
