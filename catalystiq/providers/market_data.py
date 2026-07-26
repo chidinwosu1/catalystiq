@@ -7,6 +7,7 @@ so the concrete source can be swapped later without touching module code.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from abc import ABC, abstractmethod
 
 from catalystiq.providers.base import DataDomain
@@ -44,6 +45,9 @@ class MarketDataProvider(ABC):
     @abstractmethod
     def get_news(self, symbol: str, limit: int = 10) -> list[NewsItem]:
         """Recent news items for `symbol`, most recent first."""
+
+
+_logger = logging.getLogger(__name__)
 
 
 class MarketDataError(RuntimeError):
@@ -289,6 +293,114 @@ def get_market_data_provider() -> MarketDataProvider:
 
             return FallbackMarketDataProvider(primary, secondary)
     return primary
+
+
+# --- Opportunity-scan price chain -------------------------------------------
+# The Trade Center scan and its background warmer fetch OHLCV/quotes through a
+# DEDICATED, ordered chain (primary -> fallback), independent of the global
+# get_market_data_provider() above (which still serves fundamentals/news). This
+# keeps Yahoo out of the scan when configured for Webull -> Twelve Data, while
+# never repointing fundamentals/news to a provider that can't serve them.
+
+
+class _UnavailableMarketDataProvider(MarketDataProvider):
+    """A price provider that fails every fetch with a MarketDataError, used when
+    no configured scan provider can be built (missing credentials / API key).
+    Its failures are indistinguishable to the scan from a data outage, so the
+    Trade Center reports an honest "unavailable" status and keeps retrying -
+    rather than crashing or silently falling back to Yahoo."""
+
+    PROVIDER_NAME = "unavailable"
+
+    def __init__(self, reason: str) -> None:
+        self._reason = reason
+
+    def get_quote(self, symbol: str) -> Quote:
+        raise MarketDataError(self._reason)
+
+    def get_ohlcv(
+        self, symbol: str, start: dt.date, end: dt.date | None = None, interval: str = "1d"
+    ) -> list[OHLCVBar]:
+        raise MarketDataError(self._reason)
+
+    def get_intraday_ohlcv(self, symbol: str, *, interval: str = "5m", days: int = 20):
+        raise MarketDataError(self._reason)
+
+    def get_fundamentals(self, symbol: str) -> FundamentalsSnapshot:
+        raise MarketDataError(self._reason)
+
+    def get_news(self, symbol: str, limit: int = 10) -> list[NewsItem]:
+        raise MarketDataError(self._reason)
+
+
+def _build_named_market_data_provider(name: str) -> MarketDataProvider | None:
+    """Construct a price provider by config name, or return None for an empty
+    name. Raises on an unknown name; a missing-credential failure propagates so
+    the caller can decide to skip that leg of the chain.
+
+      "yahoo"       - Yahoo Finance via yfinance (keyless).
+      "webull"      - Webull OpenAPI Market Data (daily d1 bars + quotes).
+      "twelve_data" - Twelve Data (daily OHLCV + quote) via TWELVE_DATA_API_KEY.
+    """
+    key = (name or "").strip().lower()
+    if not key:
+        return None
+    if key == "yahoo":
+        return YahooFinanceProvider()
+    if key == "webull":
+        return get_webull_market_data_provider()
+    if key == "twelve_data":
+        from catalystiq.providers.twelve_data import get_twelve_data_provider
+
+        return get_twelve_data_provider()
+    raise ValueError(f"Unknown price provider {name!r}")
+
+
+def get_scan_market_data_provider() -> MarketDataProvider:
+    """The ordered price chain the opportunity scan + warmer use: the configured
+    primary (``market_data_primary_provider``) then the fallback
+    (``market_data_fallback_provider``). A leg that can't be built (missing
+    creds/key) is skipped; a single surviving leg is returned bare; two or more
+    become a :class:`ChainedMarketDataProvider` (fail over on any error). When
+    nothing can be built, an :class:`_UnavailableMarketDataProvider` is returned
+    so the scan degrades to an honest "unavailable" instead of crashing."""
+    from catalystiq.config import get_settings
+
+    settings = get_settings()
+    order = [
+        settings.market_data_primary_provider,
+        settings.market_data_fallback_provider,
+    ]
+
+    built: list[MarketDataProvider] = []
+    seen: set[str] = set()
+    attempted: list[str] = []
+    for raw in order:
+        key = (raw or "").strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        attempted.append(key)
+        try:
+            provider = _build_named_market_data_provider(key)
+        except Exception as exc:  # missing creds / unknown name -> skip this leg
+            _logger.warning("scan price provider %r could not be built: %s", key, exc)
+            continue
+        if provider is not None:
+            built.append(provider)
+
+    if not built:
+        names = ", ".join(attempted) or "(none configured)"
+        return _UnavailableMarketDataProvider(
+            f"No scan price provider could be built from [{names}] - check "
+            "MARKET_DATA_PRIMARY_PROVIDER/MARKET_DATA_FALLBACK_PROVIDER credentials."
+        )
+    if len(built) == 1:
+        return built[0]
+
+    from catalystiq.providers.fallback_market_data import ChainedMarketDataProvider
+
+    return ChainedMarketDataProvider(built)
 
 
 # --- Dedicated intraday (Entry Check) provider ------------------------------

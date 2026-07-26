@@ -645,12 +645,12 @@ def _run_background_scan(top: int, universe, key: tuple, monotonic=_time.monoton
     in-flight marker, even on failure, so a later request can retry."""
     try:
         from catalystiq.db.base import SessionLocal
-        from catalystiq.providers.market_data import get_market_data_provider
+        from catalystiq.providers.market_data import get_scan_market_data_provider
 
         db = SessionLocal()
         try:
             scan = scan_universe(
-                get_market_data_provider(),
+                get_scan_market_data_provider(),
                 db,
                 dt.datetime.now(dt.timezone.utc),
                 top=top,

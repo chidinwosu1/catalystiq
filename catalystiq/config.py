@@ -97,21 +97,30 @@ class Settings(BaseSettings):
     webull_live_account_id: str = ""
 
     # Market data provider (legacy single-provider knob, kept for the
-    # existing get_market_data_provider() factory). The primary/secondary
-    # settings below are the forward-looking source-priority controls (§16).
+    # existing get_market_data_provider() factory that still serves the
+    # general daily/quote path). The primary/fallback settings below are the
+    # source-priority controls for the OPPORTUNITY-SCAN / warmer price chain.
     market_data_provider: str = "yahoo"
 
-    # Optional failover for the daily price/quote path. When the primary
-    # (Yahoo) is RATE-LIMITED on an OHLCV/quote call, retry that call against
-    # this secondary so the universe scan still produces candidates instead of
-    # an empty "warming up" Trade Center. Empty (default) = no failover.
-    #   "webull"      - Webull OpenAPI Market Data (daily bars + quotes) via the
-    #                   existing Webull app credentials.
-    #   "twelve_data" - Twelve Data (daily OHLCV) via TWELVE_DATA_API_KEY; the
-    #                   free tier's credit budget covers the ~24-symbol scan.
-    # If the named secondary can't be built (missing creds/key) the failover is
-    # skipped and the bare primary is used. Fundamentals/news never fail over
-    # (neither secondary provides them).
+    # --- Opportunity-scan price-data provider order ------------------------
+    # The Trade Center scan and its background warmer fetch OHLCV/quotes through
+    # a dedicated, ordered chain built from these two knobs (NOT the global
+    # get_market_data_provider(), which still serves fundamentals/news on their
+    # own providers). The chain tries the primary first and, on ANY failure,
+    # fails over to the fallback; when both fail the scan reports an honest
+    # "unavailable" status (never fabricated candidates).
+    #   "yahoo"       - Yahoo Finance via yfinance (default; keyless).
+    #   "webull"      - Webull OpenAPI Market Data (daily d1 bars + quotes) via
+    #                   the existing WEBULL_APP_KEY/SECRET credentials.
+    #   "twelve_data" - Twelve Data (daily OHLCV + quote) via TWELVE_DATA_API_KEY;
+    #                   the free tier's credit budget covers the ~24-symbol scan.
+    # A configured provider that can't be built (missing creds/key) is skipped;
+    # if none can be built the chain degrades to honest "unavailable".
+    market_data_primary_provider: str = "yahoo"  # "yahoo" | "webull" | "twelve_data"
+
+    # Fallback for the scan price chain above (and, for backwards compatibility,
+    # the rate-limit failover secondary of the global get_market_data_provider()
+    # daily path). Empty (default) = no fallback.
     market_data_fallback_provider: str = ""  # "" | "webull" | "twelve_data"
 
     # --- Intraday (Entry Check) market-data source -------------------------
@@ -148,6 +157,7 @@ class Settings(BaseSettings):
     enable_finra: bool = True
     enable_nasdaq_trader: bool = True
     enable_webull: bool = False
+    enable_finnhub: bool = False
 
     # Provider API keys / credentials. Empty by default; only required when
     # the owning source is enabled (see validate_settings()). Never commit
@@ -156,6 +166,11 @@ class Settings(BaseSettings):
     bls_api_key: str = ""
     bea_api_key: str = ""
     twelve_data_api_key: str = ""
+    # Finnhub company-news provider (replaces Yahoo news). Free tier is ~60
+    # req/min; every call is paced by a shared rate limiter and cached, so the
+    # news endpoint stays well under the plan limit. Required only when
+    # ENABLE_FINNHUB=true (see validate_settings()).
+    finnhub_api_key: str = ""
 
     # SEC EDGAR requires a descriptive User-Agent (contact info) per its
     # fair-access policy - it's not a secret, but the source is unusable
@@ -432,8 +447,17 @@ def validate_settings(settings: "Settings | None" = None) -> None:
                 f"{', '.join(missing)}"
             )
 
-    # The daily-scan failover secondary, when configured, must name a provider
-    # the factory knows how to build; a typo'd/unknown name is a config error.
+    # The scan price-chain primary must name a provider the factory can build.
+    _SCAN_PRIMARY_CHOICES = ("yahoo", "webull", "twelve_data")
+    primary_name = (settings.market_data_primary_provider or "").strip().lower()
+    if primary_name and primary_name not in _SCAN_PRIMARY_CHOICES:
+        problems.append(
+            f"MARKET_DATA_PRIMARY_PROVIDER={primary_name!r} is not a supported "
+            "price provider (expected 'yahoo', 'webull', or 'twelve_data')"
+        )
+    # The scan price-chain fallback (also the global daily-path failover
+    # secondary), when configured, must name a provider the factory can build;
+    # a typo'd/unknown name is a config error.
     fallback_name = (settings.market_data_fallback_provider or "").strip().lower()
     if fallback_name and fallback_name not in ("webull", "twelve_data"):
         problems.append(
