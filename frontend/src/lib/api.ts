@@ -560,9 +560,61 @@ export interface OpportunityScan {
   status?: "ok" | "warming" | "unavailable";
 }
 
-/** Ranked rule-based candidates from a curated universe scan (top N). */
-export function getOpportunityScan(top = 4): Promise<OpportunityScan> {
-  return request(`/analysis/opportunity-scan?top=${top}`);
+/**
+ * Investing preferences sent to the scan so it personalizes the candidates.
+ * Mirrors the Define-Preferences page (see lib/preferences.tsx). When omitted,
+ * the backend returns the generic (non-personalized) ranking.
+ */
+export interface ScanPreferencesInput {
+  style: string; // intraday|day|swing|long
+  risk: string; // conservative|moderate|aggressive
+  amount: number; // investable capital, USD
+  maxLossPct: number; // max acceptable loss per position, %
+  direction: string; // long|both
+  assets: string[]; // e.g. ["Stocks", "ETFs"]
+  fractionalShares?: boolean; // defaults to true (fractional supported)
+  constraints?: string;
+}
+
+/** Build the query string for a scan, including preferences when provided. */
+function scanQuery(top: number, prefs?: ScanPreferencesInput): string {
+  const params = new URLSearchParams({ top: String(top) });
+  if (prefs) {
+    params.set("style", prefs.style);
+    params.set("risk", prefs.risk);
+    params.set("amount", String(prefs.amount));
+    params.set("max_loss_pct", String(prefs.maxLossPct));
+    params.set("direction", prefs.direction);
+    params.set("assets", prefs.assets.join(","));
+    params.set("fractional_shares", String(prefs.fractionalShares ?? true));
+    if (prefs.constraints) params.set("constraints", prefs.constraints);
+  }
+  return params.toString();
+}
+
+/** A stable signature of the preferences, used to key the share cache so two
+ *  different profiles can never be served each other's cached result. */
+function prefsSignature(top: number, prefs?: ScanPreferencesInput): string {
+  if (!prefs) return `top=${top}`;
+  return [
+    `top=${top}`,
+    prefs.style,
+    prefs.risk,
+    prefs.amount,
+    prefs.maxLossPct,
+    prefs.direction,
+    [...prefs.assets].sort().join("+"),
+    prefs.fractionalShares ?? true,
+  ].join("|");
+}
+
+/** Ranked rule-based candidates from a curated universe scan (top N).
+ *  Pass `prefs` to personalize the candidates to the user's preferences. */
+export function getOpportunityScan(
+  top = 4,
+  prefs?: ScanPreferencesInput
+): Promise<OpportunityScan> {
+  return request(`/analysis/opportunity-scan?${scanQuery(top, prefs)}`);
 }
 
 // A completed/in-flight scan is shared across components so that, e.g., the
@@ -571,15 +623,22 @@ export function getOpportunityScan(top = 4): Promise<OpportunityScan> {
 // React StrictMode's double-invoked effects in dev). The window is short so the
 // data stays fresh; a failed scan is not cached, so a later mount can retry.
 const SCAN_SHARE_MS = 30_000;
-let _scanShared: { top: number; at: number; promise: Promise<OpportunityScan> } | null = null;
+let _scanShared: { sig: string; at: number; promise: Promise<OpportunityScan> } | null = null;
 
-export function getOpportunityScanShared(top = 4): Promise<OpportunityScan> {
+export function getOpportunityScanShared(
+  top = 4,
+  prefs?: ScanPreferencesInput
+): Promise<OpportunityScan> {
   const now = Date.now();
-  if (_scanShared && _scanShared.top === top && now - _scanShared.at < SCAN_SHARE_MS) {
+  const sig = prefsSignature(top, prefs);
+  // The share key includes the preferences, so submitting new preferences
+  // bypasses a result computed for the previous preference set instead of
+  // serving it stale from this cache.
+  if (_scanShared && _scanShared.sig === sig && now - _scanShared.at < SCAN_SHARE_MS) {
     return _scanShared.promise;
   }
-  const promise = getOpportunityScan(top);
-  const entry = { top, at: now, promise };
+  const promise = getOpportunityScan(top, prefs);
+  const entry = { sig, at: now, promise };
   _scanShared = entry;
   promise.catch(() => {
     // Drop a failed scan so it isn't served from the share cache.

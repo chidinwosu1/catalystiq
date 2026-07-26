@@ -68,13 +68,24 @@ def warm_and_refresh(provider, db) -> dict[str, int]:
     scoring loop off the request path). Scan precompute failures are contained."""
     import datetime as dt
 
-    from catalystiq.analysis.opportunity_score import refresh_scan_cache
+    from catalystiq.analysis.opportunity_score import (
+        refresh_scan_cache,
+        refresh_scored_cache,
+    )
 
     result = warm_universe(provider, db)
+    now = dt.datetime.now(dt.timezone.utc)
     try:
-        refresh_scan_cache(provider, db, now=dt.datetime.now(dt.timezone.utc))
+        # Generic ranked scan cache (Market Intelligence watchlist etc.).
+        refresh_scan_cache(provider, db, now=now)
     except Exception:  # pragma: no cover - defensive; warming still succeeded
         logger.exception("scan precompute failed")
+    try:
+        # Preference-independent scored universe that backs every PERSONALIZED
+        # Trade Center scan (each request applies its own preferences on top).
+        refresh_scored_cache(provider, db, now=now)
+    except Exception:  # pragma: no cover - defensive; warming still succeeded
+        logger.exception("scored precompute failed")
     return result
 
 

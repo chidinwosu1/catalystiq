@@ -9,8 +9,10 @@ import {
   type EntryQualityScore,
   type OpportunityScan,
   type OpportunityScore,
+  type ScanPreferencesInput,
 } from "../lib/api";
 import { useLiveEntryCheck, useLiveQuotes } from "../lib/liveData";
+import { usePreferences } from "../lib/preferences";
 import type { PageId } from "../types/nav";
 
 interface TradeCenterPageProps {
@@ -168,6 +170,37 @@ export default function TradeCenterPage({
   // The symbol whose Entry Check pop-out is open (null = closed).
   const [entryCheckSymbol, setEntryCheckSymbol] = useState<string | null>(null);
 
+  // The user's submitted preferences drive a PERSONALIZED scan: the candidates
+  // are filtered/sized/ranked to these values on the backend. Changing and
+  // resubmitting preferences changes `prefsKey`, which re-runs the scan (and
+  // bypasses any result cached for the previous preference set).
+  const { prefs } = usePreferences();
+  const scanPrefs = useMemo<ScanPreferencesInput>(
+    () => ({
+      style: prefs.style,
+      risk: prefs.risk,
+      amount: prefs.amount,
+      maxLossPct: prefs.maxLossPct,
+      direction: prefs.direction,
+      assets: prefs.assets,
+      fractionalShares: true,
+      constraints: prefs.constraints,
+    }),
+    [prefs]
+  );
+  const prefsKey = useMemo(
+    () =>
+      [
+        scanPrefs.style,
+        scanPrefs.risk,
+        scanPrefs.amount,
+        scanPrefs.maxLossPct,
+        scanPrefs.direction,
+        [...scanPrefs.assets].sort().join("+"),
+      ].join("|"),
+    [scanPrefs]
+  );
+
   // The backend serves the scan from a warm cache and returns a fast placeholder
   // when it's cold (status "warming") or when the upstream data provider is
   // temporarily throttled (status "unavailable") — rather than blocking the
@@ -195,7 +228,7 @@ export default function TradeCenterPage({
     };
 
     const load = (useShared: boolean) => {
-      (useShared ? getOpportunityScanShared(4) : getOpportunityScan(4))
+      (useShared ? getOpportunityScanShared(4, scanPrefs) : getOpportunityScan(4, scanPrefs))
         .then((scan) => {
           if (!alive) return;
           setCandidates(scan.candidates);
@@ -217,12 +250,16 @@ export default function TradeCenterPage({
 
     setLoading(true);
     setError(null);
+    setCandidates(null);
     load(true);
     return () => {
       alive = false;
       if (timer) clearTimeout(timer);
     };
-  }, []);
+    // Re-run whenever the submitted preferences change (prefsKey), so the four
+    // cards re-personalize instead of showing the previous profile's setups.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefsKey]);
 
   // Live candidate prices track the loaded set of candidates through the shared
   // 15s cache. The opportunity scan itself is slow-changing and stays one-shot.
