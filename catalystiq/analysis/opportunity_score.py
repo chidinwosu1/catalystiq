@@ -25,6 +25,7 @@ out, injected clock) so every rule is unit-testable offline.
 from __future__ import annotations
 
 import datetime as dt
+from dataclasses import dataclass as _dataclass
 
 from catalystiq.analysis.indicators import compute_technical_snapshot
 from catalystiq.analysis.market_context import (
@@ -460,16 +461,34 @@ SCAN_UNIVERSE: tuple[str, ...] = (
 _MAX_SCAN_TOP = 10
 
 
-def scan_universe(provider, db, now: dt.datetime, top: int = 4, universe=None) -> OpportunityScan:
-    """Score every symbol in the universe with the rule-based engine, keep only
-    the eligible (status=available) ones, rank by score desc, and return the top
-    N. A symbol whose data can't be fetched or isn't eligible is skipped - it is
-    NEVER replaced with mock or fabricated data."""
+@_dataclass
+class ScoredUniverse:
+    """The eligible, scored universe - the expensive, PREFERENCE-INDEPENDENT
+    part of a scan. Personalization (filtering/ranking by user preferences) is a
+    cheap, pure transform applied on top of this, so one scored universe backs
+    many different personalized results without re-scoring."""
+
+    scored: list[OpportunityScore]   # eligible (status="available"), score desc
+    symbols: tuple[str, ...]
+    fetch_failures: int
+    rate_limited: bool
+
+    @property
+    def data_outage(self) -> bool:
+        # Universe-wide fetch failure (a provider/data outage) vs "nothing
+        # qualifies" - only the former should read as "unavailable".
+        return bool(self.symbols) and self.fetch_failures * 2 >= len(self.symbols)
+
+
+def _score_universe(provider, db, now: dt.datetime, universe=None) -> ScoredUniverse:
+    """Score every symbol in the universe with the rule-based engine and keep the
+    eligible (status="available") ones, ranked by score desc. A symbol whose data
+    can't be fetched or isn't eligible is skipped - NEVER mock-filled. This is the
+    shared, preference-independent core of every scan."""
     from catalystiq.providers.fundamentals_cache import is_rate_limited_error
     from catalystiq.providers.market_data import MarketDataError
 
     symbols = tuple(universe) if universe else SCAN_UNIVERSE
-    top = max(0, min(top, _MAX_SCAN_TOP))
 
     eligible: list[OpportunityScore] = []
     fetch_failures = 0  # symbols whose market data could not be fetched at all
@@ -498,7 +517,32 @@ def scan_universe(provider, db, now: dt.datetime, top: int = 4, universe=None) -
     # warm path means candidates render as soon as the daily scoring completes -
     # the intraday fetch never delays a card appearing. Each candidate carries
     # entry_quality=None; the card fills it in on first poll.
-    candidates = eligible[:top]
+    return ScoredUniverse(
+        scored=eligible, symbols=symbols, fetch_failures=fetch_failures,
+        rate_limited=rate_limited,
+    )
+
+
+def _outage_note(rate_limited: bool) -> str:
+    return (
+        "Market data is temporarily rate-limited by the upstream provider; "
+        "the scan will keep retrying automatically."
+        if rate_limited
+        else "Market data is temporarily unavailable; the scan will keep "
+        "retrying automatically."
+    )
+
+
+def scan_universe(provider, db, now: dt.datetime, top: int = 4, universe=None) -> OpportunityScan:
+    """Score every symbol in the universe with the rule-based engine, keep only
+    the eligible (status=available) ones, rank by score desc, and return the top
+    N. A symbol whose data can't be fetched or isn't eligible is skipped - it is
+    NEVER replaced with mock or fabricated data. This is the GENERIC (non-
+    personalized) scan; see ``scan_universe_personalized`` for the preference-
+    aware variant."""
+    top = max(0, min(top, _MAX_SCAN_TOP))
+    su = _score_universe(provider, db, now, universe=universe)
+    candidates = su.scored[:top]
 
     # Decide status/note honestly. An empty result has two very different
     # causes: (a) the whole universe was unfetchable (a provider/data outage -
@@ -508,30 +552,40 @@ def scan_universe(provider, db, now: dt.datetime, top: int = 4, universe=None) -
     # "unavailable" with a note the UI can retry on.
     status = "ok"
     note: str | None = None
-    if not eligible:
-        data_outage = symbols and fetch_failures * 2 >= len(symbols)
-        if data_outage:
+    if not su.scored:
+        if su.data_outage:
             status = "unavailable"
-            note = (
-                "Market data is temporarily rate-limited by the upstream provider; "
-                "the scan will keep retrying automatically."
-                if rate_limited
-                else "Market data is temporarily unavailable; the scan will keep "
-                "retrying automatically."
-            )
+            note = _outage_note(su.rate_limited)
         else:
             note = "No symbols currently meet the rule-based eligibility criteria."
 
     return OpportunityScan(
         as_of=now if now.tzinfo else now.replace(tzinfo=dt.timezone.utc),
         formula_version=FORMULA_VERSION,
-        universe_size=len(symbols),
-        eligible_count=len(eligible),
+        universe_size=len(su.symbols),
+        eligible_count=len(su.scored),
         top=top,
         candidates=candidates,
         ml=_ML_NOT_AVAILABLE,
         note=note,
         status=status,
+    )
+
+
+def scan_universe_personalized(
+    provider, db, now: dt.datetime, prefs, top: int = 4, universe=None
+) -> OpportunityScan:
+    """Score the universe, then filter/size/re-rank for ``prefs`` and take the
+    top N. The expensive scoring is identical to the generic scan; personalization
+    is a cheap pure transform on top (see analysis/personalize.py)."""
+    from catalystiq.analysis.personalize import personalize_scan
+
+    top = max(0, min(top, _MAX_SCAN_TOP))
+    su = _score_universe(provider, db, now, universe=universe)
+    return personalize_scan(
+        su.scored, prefs, now=now, universe_size=len(su.symbols), top=top,
+        data_outage=(not su.scored and su.data_outage),
+        outage_note=_outage_note(su.rate_limited),
     )
 
 
@@ -544,7 +598,6 @@ def scan_universe(provider, db, now: dt.datetime, top: int = 4, universe=None) -
 import logging as _logging  # noqa: E402
 import threading as _threading  # noqa: E402
 import time as _time  # noqa: E402
-from dataclasses import dataclass as _dataclass  # noqa: E402
 
 _logger = _logging.getLogger(__name__)
 
@@ -724,6 +777,165 @@ def scan_universe_fast(
     # refresh above will replace it shortly.
     if entry is not None:
         return entry.scan
+    return _warming_scan(now, top_c, symbols)
+
+
+# --- Personalized scan cache (preference-aware) -----------------------------
+# Personalization must not re-run the expensive scoring loop per preference set:
+# the SCORED UNIVERSE (eligible rule-based scores) is preference-independent and
+# cached ONCE per symbol universe here; each request then applies its own
+# preferences as a cheap pure transform (analysis/personalize.py). This is why
+# submitting new preferences immediately changes the top-4 without busting or
+# waiting on the scored cache - there is no per-preference cached result to go
+# stale. The cache key is the symbol universe only; preferences are applied on
+# read, so two different profiles can NEVER be served each other's ranking.
+
+@_dataclass
+class _ScoredCacheEntry:
+    scored: ScoredUniverse
+    stored_at: float
+
+
+_SCORED_CACHE: dict[tuple, _ScoredCacheEntry] = {}
+_SCORED_INFLIGHT: set[tuple] = set()
+
+
+def clear_scored_cache() -> None:
+    """Drop the cached scored universes. Test-support only."""
+    with _SCAN_CACHE_LOCK:
+        _SCORED_CACHE.clear()
+        _SCORED_INFLIGHT.clear()
+
+
+def _scored_key(symbols: tuple[str, ...]) -> tuple:
+    return ("scored", symbols)
+
+
+def refresh_scored_cache(
+    provider, db, now: dt.datetime, universe=None, monotonic=_time.monotonic
+) -> ScoredUniverse:
+    """Score the universe and store it in the preference-independent scored
+    cache. Called by the background warmer so a personalized request is a cache
+    read + cheap transform rather than a full scoring loop."""
+    symbols = tuple(universe) if universe else SCAN_UNIVERSE
+    su = _score_universe(provider, db, now, universe=universe)
+    with _SCAN_CACHE_LOCK:
+        _SCORED_CACHE[_scored_key(symbols)] = _ScoredCacheEntry(scored=su, stored_at=monotonic())
+    return su
+
+
+def _personalize_from_scored(
+    su: ScoredUniverse, prefs, now: dt.datetime, top: int
+) -> OpportunityScan:
+    from catalystiq.analysis.personalize import personalize_scan
+
+    return personalize_scan(
+        su.scored, prefs, now=now, universe_size=len(su.symbols), top=top,
+        data_outage=(not su.scored and su.data_outage),
+        outage_note=_outage_note(su.rate_limited),
+    )
+
+
+def scan_universe_personalized_cached(
+    provider, db, now: dt.datetime, prefs, top: int = 4, universe=None,
+    *, ttl_seconds: float | None = None, monotonic=_time.monotonic,
+) -> OpportunityScan:
+    """Personalized scan backed by the scored-universe cache. Scores the universe
+    at most once per TTL (regardless of preferences); each call personalizes the
+    cached scored universe for its own ``prefs``. Used for ad-hoc universe
+    overrides and in tests (no background threads)."""
+    if ttl_seconds is None:
+        from catalystiq.config import get_settings
+
+        ttl_seconds = get_settings().opportunity_scan_cache_ttl_seconds
+
+    symbols = tuple(universe) if universe else SCAN_UNIVERSE
+    key = _scored_key(symbols)
+
+    su: ScoredUniverse | None = None
+    if ttl_seconds > 0:
+        with _SCAN_CACHE_LOCK:
+            entry = _SCORED_CACHE.get(key)
+            if entry is not None and (monotonic() - entry.stored_at) < ttl_seconds:
+                su = entry.scored
+    if su is None:
+        su = _score_universe(provider, db, now, universe=universe)
+        if ttl_seconds > 0:
+            with _SCAN_CACHE_LOCK:
+                _SCORED_CACHE[key] = _ScoredCacheEntry(scored=su, stored_at=monotonic())
+    return _personalize_from_scored(su, prefs, now, max(0, min(top, _MAX_SCAN_TOP)))
+
+
+def _run_background_scored(universe, key: tuple, monotonic=_time.monotonic) -> None:
+    """Compute + cache the scored universe in a daemon thread. Mirrors
+    ``_run_background_scan`` but stores the preference-independent scored set."""
+    try:
+        from catalystiq.db.base import SessionLocal
+        from catalystiq.providers.market_data import get_scan_market_data_provider
+
+        db = SessionLocal()
+        try:
+            su = _score_universe(
+                get_scan_market_data_provider(),
+                db,
+                dt.datetime.now(dt.timezone.utc),
+                universe=universe,
+            )
+            with _SCAN_CACHE_LOCK:
+                _SCORED_CACHE[key] = _ScoredCacheEntry(scored=su, stored_at=monotonic())
+        finally:
+            db.close()
+    except Exception:  # pragma: no cover - defensive; a failed warm just retries
+        _logger.exception("background scored warm failed for %s", key)
+    finally:
+        with _SCAN_CACHE_LOCK:
+            _SCORED_INFLIGHT.discard(key)
+
+
+def _start_background_scored(universe, key: tuple) -> None:
+    """Spawn the background scored compute. Isolated so tests can stub it out."""
+    _threading.Thread(
+        target=_run_background_scored, args=(universe, key), daemon=True
+    ).start()
+
+
+def scan_universe_personalized_fast(
+    now: dt.datetime, prefs, top: int = 4, universe=None,
+    *, ttl_seconds: float | None = None, monotonic=_time.monotonic,
+) -> OpportunityScan:
+    """Non-blocking personalized scan for the request path. Serves the cached
+    scored universe (personalized for ``prefs``, even slightly stale) and kicks a
+    single-flight background refresh when it's cold/expired; returns a fast
+    "warming up" placeholder only when nothing is cached yet. The cold scoring
+    loop never runs on the request thread, and personalization is per-request so
+    the four cards always reflect the CURRENT preferences."""
+    if ttl_seconds is None:
+        from catalystiq.config import get_settings
+
+        ttl_seconds = get_settings().opportunity_scan_cache_ttl_seconds
+
+    symbols = tuple(universe) if universe else SCAN_UNIVERSE
+    top_c = max(0, min(top, _MAX_SCAN_TOP))
+    key = _scored_key(symbols)
+
+    with _SCAN_CACHE_LOCK:
+        entry = _SCORED_CACHE.get(key)
+        is_fresh = (
+            entry is not None and ttl_seconds > 0 and (monotonic() - entry.stored_at) < ttl_seconds
+        )
+        # A cached data-outage scored set is transient - re-warm it even while
+        # nominally fresh so the page recovers as soon as the throttle lifts.
+        entry_outage = entry is not None and (not entry.scored.scored and entry.scored.data_outage)
+        needs_warm = entry is None or not is_fresh or entry_outage
+        should_start = needs_warm and key not in _SCORED_INFLIGHT
+        if should_start:
+            _SCORED_INFLIGHT.add(key)
+
+    if should_start:
+        _start_background_scored(universe, key)
+
+    if entry is not None:
+        return _personalize_from_scored(entry.scored, prefs, now, top_c)
     return _warming_scan(now, top_c, symbols)
 
 

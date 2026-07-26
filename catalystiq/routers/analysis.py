@@ -21,6 +21,8 @@ from catalystiq.analysis.entry_quality import resolve_entry_quality
 from catalystiq.analysis.opportunity_score import (
     scan_universe_cached,
     scan_universe_fast,
+    scan_universe_personalized_cached,
+    scan_universe_personalized_fast,
     score_symbol,
 )
 from catalystiq.auth import verify_action_key
@@ -34,7 +36,7 @@ from catalystiq.providers.market_data import (
 from catalystiq.schemas.analysis import TechnicalSnapshot
 from catalystiq.schemas.diagnostics import MarketDataDiagnostics, ProviderProbe
 from catalystiq.schemas.entry_quality import EntryQualityScore
-from catalystiq.schemas.opportunity import OpportunityScan, OpportunityScore
+from catalystiq.schemas.opportunity import OpportunityScan, OpportunityScore, ScanPreferences
 from catalystiq.schemas.market_context import MarketContextSnapshot
 from catalystiq.schemas.market_structure import MarketStructureSnapshot
 from catalystiq.schemas.risk import RiskSnapshot
@@ -84,31 +86,101 @@ def get_technical_snapshot(
     return results[GoldProduct.TECHNICAL]
 
 
+def _resolve_scan_preferences(
+    style: str | None,
+    risk: str | None,
+    amount: float | None,
+    max_loss_pct: float | None,
+    direction: str | None,
+    assets: str | None,
+    fractional_shares: bool | None,
+    constraints: str | None,
+) -> ScanPreferences | None:
+    """Build a ScanPreferences from the query params, or None when the caller
+    sent no preference at all (a generic, non-personalized scan). Presence of
+    ANY preference param turns on personalization; unspecified fields fall back
+    to the ScanPreferences defaults."""
+    provided = {
+        "style": style, "risk": risk, "amount": amount, "max_loss_pct": max_loss_pct,
+        "direction": direction, "assets": assets, "fractional_shares": fractional_shares,
+    }
+    if all(v is None for v in provided.values()):
+        return None
+    kwargs: dict = {}
+    if style is not None:
+        kwargs["style"] = style
+    if risk is not None:
+        kwargs["risk"] = risk
+    if amount is not None:
+        kwargs["amount"] = amount
+    if max_loss_pct is not None:
+        kwargs["max_loss_pct"] = max_loss_pct
+    if direction is not None:
+        kwargs["direction"] = direction
+    if assets is not None:
+        kwargs["assets"] = assets
+    if fractional_shares is not None:
+        kwargs["fractional_shares"] = fractional_shares
+    if constraints is not None:
+        kwargs["constraints"] = constraints
+    return ScanPreferences(**kwargs)
+
+
 @router.get("/opportunity-scan", response_model=OpportunityScan)
 def get_opportunity_scan(
     top: int = Query(default=4, gt=0, le=10),
     symbols: str | None = Query(
         default=None, description="Optional universe override (comma-separated symbols)."
     ),
+    style: str | None = Query(default=None, description="Holding period: intraday|day|swing|long."),
+    risk: str | None = Query(default=None, description="Risk tolerance: conservative|moderate|aggressive."),
+    amount: float | None = Query(default=None, description="Investable capital, USD."),
+    max_loss_pct: float | None = Query(default=None, description="Max acceptable loss per position, %."),
+    direction: str | None = Query(default=None, description="Direction: long|both."),
+    assets: str | None = Query(default=None, description="Asset classes (comma-separated, e.g. stocks,etfs)."),
+    fractional_shares: bool | None = Query(default=None, description="Broker supports fractional shares."),
+    constraints: str | None = Query(default=None, description="Free-text portfolio constraints."),
     provider: MarketDataProvider = Depends(get_market_data_provider),
     db: Session = Depends(get_db),
 ):
     """Scan a curated eligible universe, score each symbol with the rule-based
     engine, and return the top-N ranked candidates (only fully-eligible
     'available' scores qualify; unfetchable/ineligible symbols are skipped, never
-    mock-filled)."""
+    mock-filled).
+
+    When any user-preference query param is supplied, the scan is PERSONALIZED:
+    the eligible set is filtered by asset class, direction, and risk / max-loss
+    volatility eligibility, position-sized for the investable amount, and
+    re-ranked with holding-period-appropriate factor weights. With no preference
+    params it returns the generic ranking (unchanged behavior)."""
     now = dt.datetime.now(dt.timezone.utc)
+    prefs = _resolve_scan_preferences(
+        style, risk, amount, max_loss_pct, direction, assets, fractional_shares, constraints
+    )
+    universe = None
     if symbols:
-        # Explicit ad-hoc universe: no background warmer backs it, so compute
-        # inline (cached) as before. `provider` is the price chain (Webull ->
-        # Twelve Data) - get_market_data_provider() now returns it - so an ad-hoc
-        # scan never touches Yahoo either.
         universe = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+
+    if prefs is not None:
+        if universe is not None:
+            # Explicit ad-hoc universe: no background warmer backs it, so compute
+            # (scored, cached) inline and personalize.
+            return scan_universe_personalized_cached(
+                provider, db, now=now, prefs=prefs, top=top, universe=universe
+            )
+        # Default universe: never block the request on a cold scan. Serve the
+        # cached scored universe personalized for these preferences; warm in the
+        # background; fast "warming up" placeholder only when nothing is cached.
+        return scan_universe_personalized_fast(now, prefs=prefs, top=top)
+
+    if universe is not None:
+        # Explicit ad-hoc universe (generic): compute inline (cached) as before.
+        # `provider` is the price chain (Webull -> Twelve Data) - so an ad-hoc
+        # scan never touches Yahoo either.
         return scan_universe_cached(provider, db, now=now, top=top, universe=universe)
-    # Default universe: never block the request on a cold scan. Serve cache (even
-    # slightly stale) and warm in the background, returning a fast "warming up"
-    # placeholder only when nothing is cached yet. Prevents the UI from hanging
-    # on "Scanning the universe…".
+    # Default universe (generic): serve cache (even slightly stale) and warm in
+    # the background, returning a fast "warming up" placeholder only when nothing
+    # is cached yet. Prevents the UI from hanging on "Scanning the universe…".
     return scan_universe_fast(now, top=top)
 
 

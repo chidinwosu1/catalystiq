@@ -11,9 +11,121 @@ from __future__ import annotations
 
 import datetime as dt
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from catalystiq.schemas.entry_quality import EntryQualityScore
+
+# Canonical trading styles / holding periods, risk tolerances, and directions.
+# Mirror the frontend Define-Preferences page (see frontend/src/lib/preferences.tsx).
+_STYLES = ("intraday", "day", "swing", "long")
+_RISKS = ("conservative", "moderate", "aggressive")
+_DIRECTIONS = ("long", "both")
+
+# Free-text asset-class labels (from the UI or an API caller) normalized to the
+# governed classes used by catalystiq.analysis.sectors.asset_class(). Only
+# "stock" and "etf" are actually scannable today; option/future are accepted so
+# an explicit selection filters correctly (to an honest empty set) rather than
+# being silently ignored.
+_ASSET_ALIAS = {
+    "stock": "stock", "stocks": "stock", "equity": "stock", "equities": "stock",
+    "etf": "etf", "etfs": "etf",
+    "option": "option", "options": "option",
+    "future": "future", "futures": "future",
+}
+
+
+def normalize_asset_class(label: str) -> str | None:
+    """Map a raw asset-class label to a governed class, or None if unrecognized."""
+    return _ASSET_ALIAS.get(str(label).strip().lower())
+
+
+class ScanPreferences(BaseModel):
+    """User investing preferences that personalize the opportunity scan.
+
+    These are the exact values collected on the Define-Preferences page. Unlike
+    the previous behavior (where preferences never left the browser), the scan
+    now receives them and applies each one to eligibility and/or ranking. Every
+    field has a safe default so a caller may send a partial set.
+    """
+
+    style: str = "swing"          # holding period: intraday|day|swing|long
+    risk: str = "moderate"        # conservative|moderate|aggressive
+    amount: float = 10_000.0      # investable capital, USD
+    max_loss_pct: float = 5.0     # max acceptable loss per position, %
+    direction: str = "long"       # long|both
+    assets: tuple[str, ...] = ("stock",)  # normalized governed classes
+    fractional_shares: bool = True        # broker supports fractional shares
+    constraints: str = ""                 # free-text; no automated effect yet
+
+    @field_validator("style")
+    @classmethod
+    def _v_style(cls, v: str) -> str:
+        v = str(v).strip().lower()
+        return v if v in _STYLES else "swing"
+
+    @field_validator("risk")
+    @classmethod
+    def _v_risk(cls, v: str) -> str:
+        v = str(v).strip().lower()
+        return v if v in _RISKS else "moderate"
+
+    @field_validator("direction")
+    @classmethod
+    def _v_direction(cls, v: str) -> str:
+        v = str(v).strip().lower()
+        return v if v in _DIRECTIONS else "long"
+
+    @field_validator("amount")
+    @classmethod
+    def _v_amount(cls, v: float) -> float:
+        return max(0.0, float(v))
+
+    @field_validator("max_loss_pct")
+    @classmethod
+    def _v_max_loss(cls, v: float) -> float:
+        # Clamp to a sane (0, 100] band; 0 or absurd values would make every
+        # setup ineligible / eligible for the wrong reason.
+        return min(100.0, max(0.01, float(v)))
+
+    @field_validator("assets", mode="before")
+    @classmethod
+    def _v_assets(cls, v) -> tuple[str, ...]:
+        if v is None:
+            return ("stock",)
+        if isinstance(v, str):
+            raw = [p for p in v.split(",")]
+        else:
+            raw = list(v)
+        out: list[str] = []
+        for item in raw:
+            norm = normalize_asset_class(item)
+            if norm and norm not in out:
+                out.append(norm)
+        # An empty/all-unrecognized selection means "no asset class chosen" -
+        # keep it empty so personalization returns an honest empty set rather
+        # than silently defaulting to stocks.
+        return tuple(out)
+
+
+class PersonalizationInfo(BaseModel):
+    """Per-candidate explanation of how the active preferences were applied.
+
+    Present only on candidates returned from a personalized scan. It makes the
+    effect of each preference auditable end-to-end (tests assert on it, and the
+    UI can surface it) rather than the score changing invisibly.
+    """
+
+    direction: str                       # "long" | "short" - the setup's bias
+    asset_class: str                     # "stock" | "etf"
+    reference_price: float | None        # last close used for sizing
+    base_score: int                      # the generic rule-based score
+    personalized_score: int              # holding-period / direction weighted
+    atr_pct: float | None                # volatility used by the risk gate
+    stop_distance_pct: float | None      # style-scaled ATR stop distance
+    est_shares: float | None             # position size given capital & risk
+    est_position_value: float | None
+    est_max_loss: float | None           # $ at risk if the stop is hit
+    applied: list[str]                   # human-readable notes on what applied
 
 
 class FactorScore(BaseModel):
@@ -58,6 +170,9 @@ class OpportunityScore(BaseModel):
     # Strength's "is this a high-quality STOCK to trade?". None when not computed
     # (e.g. no intraday feed); insufficient_data when intraday inputs are missing.
     entry_quality: EntryQualityScore | None = None
+    # How the active user preferences were applied to this candidate. None on a
+    # generic (non-personalized) scan; populated on a personalized scan.
+    personalization: PersonalizationInfo | None = None
 
 
 class OpportunityScan(BaseModel):

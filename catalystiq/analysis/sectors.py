@@ -57,6 +57,26 @@ SYMBOL_SECTOR: dict[str, str] = {
 }
 
 
+# Governed asset-class membership. Every scan-universe symbol above is a common
+# stock; the ETFs listed here (broad-market + SPDR sector ETFs, the same ones
+# used as sector benchmarks) are recognized so an "ETFs" asset-class preference
+# filters to a real, honest set instead of being silently ignored. A symbol not
+# listed here defaults to "stock" - the curated universe is stocks-only, so this
+# is a safe default for it; ad-hoc universes should use known tickers.
+_ETF_SYMBOLS: frozenset[str] = frozenset({
+    # Broad market / index ETFs
+    "SPY", "QQQ", "DIA", "IWM", "VOO", "VTI",
+    # SPDR sector ETFs (also our sector benchmarks)
+    "XLK", "XLF", "XLV", "XLE", "XLY", "XLP", "XLI", "XLB", "XLU", "XLRE", "XLC",
+})
+
+
+def asset_class(symbol: str) -> str:
+    """Governed asset class for ``symbol``: "etf" for recognized ETFs, else
+    "stock". The scan universe is stocks-only, so "stock" is the safe default."""
+    return "etf" if symbol.upper() in _ETF_SYMBOLS else "stock"
+
+
 def governed_sector(symbol: str) -> str | None:
     """The governed sector name for ``symbol``, or None if not covered."""
     return SYMBOL_SECTOR.get(symbol.upper())
