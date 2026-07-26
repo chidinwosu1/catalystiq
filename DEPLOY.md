@@ -87,27 +87,51 @@ immediately.
 | `DATABASE_URL` | api | **Wired from `catalystiq-db`** by `render.yaml` |
 | `VITE_API_BASE_URL` | web | **You set it** to the backend URL (step 4) |
 
-### Optional (only if you want that data source; add in the dashboard)
-All off by default. Enabling a source with a missing key makes the backend
-fail startup, so set the flag **and** its key together.
+### Market-data providers (Yahoo has been removed)
+
+Yahoo Finance is no longer used anywhere. Each data category now has a dedicated
+provider, and they are wired in `render.yaml`. **Set exactly these values** (the
+non-secret ones are already in `render.yaml`; enter the secrets in the dashboard):
+
+| Variable | Value to enter | Purpose |
+|---|---|---|
+| `MARKET_DATA_PRIMARY_PROVIDER` | `webull` | Primary price/quote/history source |
+| `MARKET_DATA_FALLBACK_PROVIDER` | `twelve_data` | Price fallback on any Webull failure |
+| `INTRADAY_MARKET_DATA_PROVIDER` | `webull` | Real-time Entry Check feed |
+| `WEBULL_APP_KEY` | *your Webull app key* | Webull OpenAPI market data |
+| `WEBULL_APP_SECRET` | *your Webull app secret* | Webull OpenAPI market data |
+| `ENABLE_TWELVE_DATA` | `true` | Enables the Twelve Data fallback source |
+| `TWELVE_DATA_API_KEY` | *your Twelve Data key* | Price fallback (free tier covers the ~24-symbol scan) |
+| `ENABLE_SEC_EDGAR` | `true` | Enables SEC EDGAR fundamentals |
+| `SEC_USER_AGENT` | `Catalyst IQ you@example.com` | SEC fair-access requires a descriptive UA with contact info |
+| `ENABLE_FINNHUB` | `true` | Enables Finnhub company news |
+| `FINNHUB_API_KEY` | *your Finnhub key* | Company news (cached + rate-limited in-app) |
+
+- **Price data** (scan, warmer, quotes, charts): Webull → Twelve Data, an ordered
+  chain that fails over on any error and reports an honest "unavailable" when both
+  are down (never fabricated candidates).
+- **Fundamentals**: SEC EDGAR Company Facts (financials from XBRL; sector/industry
+  from the SIC code; market cap & trailing P/E from a live price × SEC shares/EPS).
+  Forward P/E, PEG and EV/EBITDA are not derivable from SEC data and stay blank.
+- **News**: Finnhub company news.
+
+If you also use the read-only Webull broker verification, keep `ENABLE_WEBULL=true`
+and `WEBULL_ACCOUNT_ID` set as before; the market-data chain only needs
+`WEBULL_APP_KEY`/`WEBULL_APP_SECRET`.
+
+### Other optional data sources (add in the dashboard)
+Enabling a source with a missing key makes the backend fail startup, so set the
+flag **and** its key together.
 | Source | Vars |
 |---|---|
-| SEC EDGAR | `ENABLE_SEC_EDGAR=true`, `SEC_USER_AGENT="Catalyst IQ you@example.com"` |
 | FRED (ephemeral macro panel) | `ENABLE_FRED=true`, `FRED_API_KEY=…` — isolated, no-store, allowlisted public-domain series only; see [`FRED_COMPLIANCE.md`](./FRED_COMPLIANCE.md) |
 | BLS | `ENABLE_BLS=true`, `BLS_API_KEY=…` |
 | BEA | `ENABLE_BEA=true`, `BEA_API_KEY=…` |
-| Twelve Data (restricted personal-use) | `ENABLE_TWELVE_DATA=true`, `TWELVE_DATA_API_KEY=…` — central credit limits, auto-shutoff, no raw-value persistence; single-user only; see [`TWELVE_DATA_COMPLIANCE.md`](./TWELVE_DATA_COMPLIANCE.md) |
 | FINRA, Nasdaq Trader | *(enabled by default; keyless)* |
-| Webull (READ-ONLY) | `ENABLE_WEBULL=true`, `WEBULL_APP_KEY/SECRET/ACCOUNT_ID` |
 
 Tunables with sensible defaults: `SESSION_TTL_SECONDS` (43200),
-`SESSION_COOKIE_NAME` (`ciq_session`), `PROVIDER_COMPARISON_TOLERANCE_PCT`.
-
-To keep the Trade Center populated when Yahoo rate-limits the shared egress,
-set `MARKET_DATA_FALLBACK_PROVIDER` to a failover secondary for the daily
-scan — `webull` (reuses `WEBULL_APP_KEY`/`SECRET`) or `twelve_data` (needs
-`TWELVE_DATA_API_KEY`; free tier covers the ~24-symbol universe). Empty
-(default) means no failover.
+`SESSION_COOKIE_NAME` (`ciq_session`), `PROVIDER_COMPARISON_TOLERANCE_PCT`,
+`FINNHUB_NEWS_LOOKBACK_DAYS` (14), `FINNHUB_NEWS_CACHE_TTL_SECONDS` (600).
 
 ### Do NOT set (keeps the trading safeguards intact)
 `ENABLE_PAPER_ORDER_SUBMISSION`, `ENABLE_LIVE_ORDER_SUBMISSION`,

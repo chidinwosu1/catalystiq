@@ -59,16 +59,8 @@ class SourceDescriptor:
 # the documented public endpoints; adapters own the exact paths.
 SOURCE_REGISTRY: list[SourceDescriptor] = [
     # --- market_data ---
-    SourceDescriptor(
-        name="yahoo",
-        domain=DataDomain.MARKET_DATA,
-        enable_setting=None,  # initial primary source, always available
-        requires_api_key=False,
-        license=LicenseClassification.FREE_PERSONAL,
-        base_urls=("https://query1.finance.yahoo.com",),
-        implemented=True,
-        notes="Initial primary historical market-data provider (via yfinance).",
-    ),
+    # Webull OpenAPI Market Data is the primary price/quote/history source; it is
+    # registered under the "webull" brokerage descriptor below (same app creds).
     SourceDescriptor(
         name="twelve_data",
         domain=DataDomain.MARKET_DATA,
@@ -78,7 +70,7 @@ SOURCE_REGISTRY: list[SourceDescriptor] = [
         license=LicenseClassification.FREE_PERSONAL,
         base_urls=("https://api.twelvedata.com",),
         implemented=True,
-        notes="Optional secondary/validation source. Disabled by default; free-tier only, not redistributable.",
+        notes="Price-data fallback for the Webull->Twelve Data chain. Free-tier only, not redistributable.",
     ),
     # --- fundamentals ---
     SourceDescriptor(
@@ -260,10 +252,6 @@ def build_adapter(name: str, settings=None):
             provider=name,
         )
 
-    if name == "yahoo":
-        from catalystiq.providers.market_data import YahooFinanceProvider
-
-        return YahooFinanceProvider()
     if name == "webull":
         from catalystiq.providers.broker import get_broker_provider
 

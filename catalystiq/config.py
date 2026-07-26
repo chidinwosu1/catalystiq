@@ -96,32 +96,24 @@ class Settings(BaseSettings):
     webull_live_app_secret: str = ""
     webull_live_account_id: str = ""
 
-    # Market data provider (legacy single-provider knob, kept for the
-    # existing get_market_data_provider() factory that still serves the
-    # general daily/quote path). The primary/fallback settings below are the
-    # source-priority controls for the OPPORTUNITY-SCAN / warmer price chain.
-    market_data_provider: str = "yahoo"
-
-    # --- Opportunity-scan price-data provider order ------------------------
-    # The Trade Center scan and its background warmer fetch OHLCV/quotes through
-    # a dedicated, ordered chain built from these two knobs (NOT the global
-    # get_market_data_provider(), which still serves fundamentals/news on their
-    # own providers). The chain tries the primary first and, on ANY failure,
-    # fails over to the fallback; when both fail the scan reports an honest
-    # "unavailable" status (never fabricated candidates).
-    #   "yahoo"       - Yahoo Finance via yfinance (default; keyless).
+    # --- Price-data (OHLCV/quote) provider order ---------------------------
+    # ALL price/quote/history fetching - the Trade Center scan, its background
+    # warmer, and the general get_market_data_provider() path - goes through a
+    # single ordered chain built from these two knobs. Yahoo has been fully
+    # removed; company fundamentals are served by SEC EDGAR and news by Finnhub
+    # through their own providers (never this chain). The chain tries the primary
+    # first and, on ANY failure, fails over to the fallback; when both fail it
+    # reports an honest "unavailable" status (never fabricated data).
     #   "webull"      - Webull OpenAPI Market Data (daily d1 bars + quotes) via
-    #                   the existing WEBULL_APP_KEY/SECRET credentials.
+    #                   the WEBULL_APP_KEY/SECRET credentials.
     #   "twelve_data" - Twelve Data (daily OHLCV + quote) via TWELVE_DATA_API_KEY;
     #                   the free tier's credit budget covers the ~24-symbol scan.
     # A configured provider that can't be built (missing creds/key) is skipped;
     # if none can be built the chain degrades to honest "unavailable".
-    market_data_primary_provider: str = "yahoo"  # "yahoo" | "webull" | "twelve_data"
+    market_data_primary_provider: str = "webull"  # "webull" | "twelve_data"
 
-    # Fallback for the scan price chain above (and, for backwards compatibility,
-    # the rate-limit failover secondary of the global get_market_data_provider()
-    # daily path). Empty (default) = no fallback.
-    market_data_fallback_provider: str = ""  # "" | "webull" | "twelve_data"
+    # Fallback leg of the price chain above. Empty = no fallback (bare primary).
+    market_data_fallback_provider: str = "twelve_data"  # "" | "webull" | "twelve_data"
 
     # --- Intraday (Entry Check) market-data source -------------------------
     # The real-time Entry Quality / Entry Check feed is served by a DEDICATED
@@ -452,13 +444,13 @@ def validate_settings(settings: "Settings | None" = None) -> None:
                 f"{', '.join(missing)}"
             )
 
-    # The scan price-chain primary must name a provider the factory can build.
-    _SCAN_PRIMARY_CHOICES = ("yahoo", "webull", "twelve_data")
+    # The price-chain primary must name a provider the factory can build.
+    _PRICE_PRIMARY_CHOICES = ("webull", "twelve_data")
     primary_name = (settings.market_data_primary_provider or "").strip().lower()
-    if primary_name and primary_name not in _SCAN_PRIMARY_CHOICES:
+    if primary_name and primary_name not in _PRICE_PRIMARY_CHOICES:
         problems.append(
             f"MARKET_DATA_PRIMARY_PROVIDER={primary_name!r} is not a supported "
-            "price provider (expected 'yahoo', 'webull', or 'twelve_data')"
+            "price provider (expected 'webull' or 'twelve_data')"
         )
     # The scan price-chain fallback (also the global daily-path failover
     # secondary), when configured, must name a provider the factory can build;

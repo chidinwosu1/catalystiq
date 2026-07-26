@@ -100,15 +100,11 @@ def get_opportunity_scan(
     now = dt.datetime.now(dt.timezone.utc)
     if symbols:
         # Explicit ad-hoc universe: no background warmer backs it, so compute
-        # inline (cached) as before. Use the dedicated scan price chain (Webull
-        # -> Twelve Data) rather than the injected global provider, so an ad-hoc
-        # scan never falls back to Yahoo either.
-        from catalystiq.providers.market_data import get_scan_market_data_provider
-
+        # inline (cached) as before. `provider` is the price chain (Webull ->
+        # Twelve Data) - get_market_data_provider() now returns it - so an ad-hoc
+        # scan never touches Yahoo either.
         universe = [s.strip().upper() for s in symbols.split(",") if s.strip()]
-        return scan_universe_cached(
-            get_scan_market_data_provider(), db, now=now, top=top, universe=universe
-        )
+        return scan_universe_cached(provider, db, now=now, top=top, universe=universe)
     # Default universe: never block the request on a cold scan. Serve cache (even
     # slightly stale) and warm in the background, returning a fast "warming up"
     # placeholder only when nothing is cached yet. Prevents the UI from hanging

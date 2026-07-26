@@ -14,7 +14,7 @@ from catalystiq.config import Settings, get_settings
 from catalystiq.db.base import get_db
 from catalystiq.pipelines import comparison as cmp
 from catalystiq.providers.base import ProviderError
-from catalystiq.providers.market_data import YahooFinanceProvider
+from catalystiq.providers.market_data import get_webull_market_data_provider
 from catalystiq.schemas.validation import ProviderComparisonRecord
 
 router = APIRouter(
@@ -48,9 +48,9 @@ def run_comparison(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ):
-    """Manually sample a Yahoo-vs-Twelve-Data quote comparison and store the
-    result. Requires Twelve Data enabled + configured (it's the optional
-    secondary validation source)."""
+    """Manually sample a Webull-vs-Twelve-Data quote comparison and store the
+    result. Requires Twelve Data enabled + configured (the price-data fallback,
+    used here as the cross-check secondary)."""
     from catalystiq.providers.registry import is_source_configured, is_source_enabled
     from catalystiq.providers.twelve_data import get_twelve_data_provider
 
@@ -64,7 +64,10 @@ def run_comparison(
     except ProviderError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    primary = YahooFinanceProvider()
+    try:
+        primary = get_webull_market_data_provider()
+    except Exception as exc:  # Webull creds missing/unbuildable
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     row = cmp.compare_quotes(
         symbol, db, primary, secondary, tolerance_pct=settings.provider_comparison_tolerance_pct
     )

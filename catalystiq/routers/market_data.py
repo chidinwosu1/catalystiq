@@ -155,8 +155,17 @@ def get_sectors(provider: MarketDataProvider = Depends(get_market_data_provider)
     return results
 
 
+def get_fundamentals_source():
+    """The provider that serves company fundamentals: SEC EDGAR Company Facts
+    (see catalystiq/providers/sec_fundamentals.py). Exposed as a dependency so it
+    can be overridden in tests, independent of the price provider."""
+    from catalystiq.providers.sec_fundamentals import get_sec_fundamentals_provider
+
+    return get_sec_fundamentals_provider()
+
+
 @router.get("/fundamentals/{symbol}", response_model=FundamentalsSnapshot)
-def get_fundamentals(symbol: str):
+def get_fundamentals(symbol: str, source=Depends(get_fundamentals_source)):
     # Company fundamentals come from SEC EDGAR Company Facts (financial fields
     # derived from XBRL; sector/industry from the SIC code; market cap / P/E from
     # a live price * SEC shares/EPS). Served through the governed cache: TTL +
@@ -164,10 +173,9 @@ def get_fundamentals(symbol: str):
     # (portfolio sector exposure, repeated lookups) stays well under SEC's
     # fair-access limit. Fundamentals never block a quote (a separate call).
     from catalystiq.providers.fundamentals_cache import get_fundamentals_cached
-    from catalystiq.providers.sec_fundamentals import get_sec_fundamentals_provider
 
     try:
-        return get_fundamentals_cached(get_sec_fundamentals_provider(), symbol)
+        return get_fundamentals_cached(source, symbol)
     except MarketDataError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

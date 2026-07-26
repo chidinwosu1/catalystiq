@@ -4,26 +4,27 @@ import pytest
 from catalystiq.config import Settings
 from catalystiq.providers.base import DataDomain, ProviderError, ProviderErrorCategory
 from catalystiq.providers.broker import WebullBroker
-from catalystiq.providers.market_data import YahooFinanceProvider
+from catalystiq.providers.twelve_data import TwelveDataProvider
 from catalystiq.providers import registry
 
 
 def test_existing_adapters_declare_identity():
-    assert YahooFinanceProvider.PROVIDER_NAME == "yahoo"
-    assert YahooFinanceProvider.DOMAIN is DataDomain.MARKET_DATA
-    assert YahooFinanceProvider.ADAPTER_VERSION  # non-empty
-
+    # Yahoo has been removed; Webull (brokerage + market data) and Twelve Data
+    # (price fallback) are the price sources now.
     assert WebullBroker.PROVIDER_NAME == "webull"
     assert WebullBroker.DOMAIN is DataDomain.BROKERAGE
     assert WebullBroker.ADAPTER_VERSION
+
+    assert TwelveDataProvider.PROVIDER_NAME == "twelve_data"
+    assert TwelveDataProvider.DOMAIN is DataDomain.MARKET_DATA
 
 
 def test_registry_covers_every_spec_source():
     names = {s.name for s in registry.SOURCE_REGISTRY}
     expected = {
-        "yahoo",
         "twelve_data",
         "sec_edgar",
+        "finnhub",
         "fred",
         "bls",
         "bea",
@@ -33,6 +34,7 @@ def test_registry_covers_every_spec_source():
         "webull",
     }
     assert expected <= names
+    assert "yahoo" not in names  # Yahoo fully removed
 
 
 def test_registry_descriptors_are_non_secret():
@@ -44,8 +46,7 @@ def test_registry_descriptors_are_non_secret():
 
 def test_keyless_sources_are_always_enabled():
     settings = Settings()
-    # Yahoo and NYSE have no enable flag => always on regardless of settings.
-    assert registry.is_source_enabled("yahoo", settings) is True
+    # NYSE has no enable flag => always on regardless of settings.
     assert registry.is_source_enabled("nyse", settings) is True
 
 
@@ -97,7 +98,8 @@ def test_build_adapter_unimplemented_source_raises_config_error(monkeypatch):
     assert "not implemented" in str(exc.value).lower()
 
 
-def test_build_adapter_yahoo_constructs():
-    adapter = registry.build_adapter("yahoo", Settings())
-    assert isinstance(adapter, YahooFinanceProvider)
-    assert adapter.PROVIDER_NAME == "yahoo"
+def test_build_adapter_keyless_source_constructs():
+    # NYSE is keyless + always enabled, so its adapter builds without any config
+    # (the price adapters need live credentials, exercised elsewhere).
+    adapter = registry.build_adapter("nyse", Settings())
+    assert adapter is not None

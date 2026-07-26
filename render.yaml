@@ -74,8 +74,40 @@ services:
         fromDatabase:
           name: catalystiq-db
           property: connectionString
-      # Order submission stays DISABLED and Webull READ-ONLY: the enable
-      # flags, order-confirmation secret, and broker credentials are
+      # --- Market-data providers (Yahoo fully removed) --------------------
+      # Price/quote/history: Webull primary -> Twelve Data fallback (the same
+      # ordered chain the Trade Center scan and its background warmer use).
+      - key: MARKET_DATA_PRIMARY_PROVIDER
+        value: webull
+      - key: MARKET_DATA_FALLBACK_PROVIDER
+        value: twelve_data
+      # Real-time Entry Check feed also on Webull.
+      - key: INTRADAY_MARKET_DATA_PROVIDER
+        value: webull
+      # Webull OpenAPI market-data credentials (also used by the read-only broker
+      # verification). Enter the real values in the dashboard; never commit them.
+      - key: WEBULL_APP_KEY
+        sync: false
+      - key: WEBULL_APP_SECRET
+        sync: false
+      # Twelve Data price-data fallback (free-tier key covers the ~24-symbol scan).
+      - key: ENABLE_TWELVE_DATA
+        value: "true"
+      - key: TWELVE_DATA_API_KEY
+        sync: false
+      # Company fundamentals: SEC EDGAR (requires a descriptive User-Agent with
+      # contact info per SEC fair-access, e.g. "Catalyst IQ you@example.com").
+      - key: ENABLE_SEC_EDGAR
+        value: "true"
+      - key: SEC_USER_AGENT
+        sync: false
+      # Company news: Finnhub (free-tier key; cached + rate-limited in the app).
+      - key: ENABLE_FINNHUB
+        value: "true"
+      - key: FINNHUB_API_KEY
+        sync: false
+      # Order submission stays DISABLED and Webull READ-ONLY: the order-submission
+      # enable flags, order-confirmation secret, and live broker credentials are
       # intentionally left unset (secure defaults in code).
 
   # --- Frontend (static site) --------------------------------------------

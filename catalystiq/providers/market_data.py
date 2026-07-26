@@ -54,245 +54,16 @@ class MarketDataError(RuntimeError):
     """Raised when a provider fails to fetch or parse data."""
 
 
-class YahooFinanceProvider(MarketDataProvider):
-    """MarketDataProvider backed by Yahoo Finance via the `yfinance` package."""
-
-    # Provider identity, per the ProviderAdapter contract
-    # (catalystiq/providers/base.py). PROVIDER_NAME is the stable registry
-    # key and what a Bronze run's `provider` field records going forward.
-    PROVIDER_NAME = "yahoo"
-    DOMAIN = DataDomain.MARKET_DATA
-
-    # Bumped whenever this adapter's parsing/field-mapping logic changes -
-    # persisted on every Bronze ingestion run (catalystiq/pipelines/
-    # market_price_pipeline.py) so a Gold result can be traced back to
-    # exactly which version of this adapter produced its source data.
-    ADAPTER_VERSION = "1.0.0"
-
-    def __init__(self) -> None:
-        # Imported lazily so importing this module doesn't require yfinance
-        # (and its heavy transitive deps) unless this provider is actually used.
-        import yfinance as yf
-
-        self._yf = yf
-
-    def _ticker(self, symbol: str):
-        return self._yf.Ticker(symbol)
-
-    def get_quote(self, symbol: str) -> Quote:
-        ticker = self._ticker(symbol)
-        try:
-            fast = ticker.fast_info
-            price = fast["last_price"]
-            previous_close = fast.get("previous_close") if hasattr(fast, "get") else None
-        except Exception as exc:  # pragma: no cover - network/library errors
-            raise MarketDataError(f"Failed to fetch quote for {symbol}: {exc}") from exc
-
-        if price is None:
-            raise MarketDataError(f"No quote available for {symbol}")
-
-        record_fetch(self.PROVIDER_NAME)
-        return Quote(
-            symbol=symbol.upper(),
-            price=float(price),
-            previous_close=float(previous_close) if previous_close is not None else None,
-            as_of=dt.datetime.now(dt.timezone.utc),
-        )
-
-    def get_ohlcv(
-        self,
-        symbol: str,
-        start: dt.date,
-        end: dt.date | None = None,
-        interval: str = "1d",
-    ) -> list[OHLCVBar]:
-        end = end or dt.date.today()
-        try:
-            df = self._ticker(symbol).history(
-                start=start.isoformat(),
-                end=(end + dt.timedelta(days=1)).isoformat(),
-                interval=interval,
-                auto_adjust=False,
-            )
-        except Exception as exc:  # pragma: no cover - network/library errors
-            raise MarketDataError(f"Failed to fetch OHLCV for {symbol}: {exc}") from exc
-
-        record_fetch(self.PROVIDER_NAME)
-        if df.empty:
-            return []
-
-        bars: list[OHLCVBar] = []
-        for index, row in df.iterrows():
-            bars.append(
-                OHLCVBar(
-                    date=index.date(),
-                    open=float(row["Open"]),
-                    high=float(row["High"]),
-                    low=float(row["Low"]),
-                    close=float(row["Close"]),
-                    volume=int(row["Volume"]),
-                )
-            )
-        return bars
-
-    def get_intraday_ohlcv(
-        self,
-        symbol: str,
-        *,
-        interval: str = "5m",
-        days: int = 20,
-    ) -> list[IntradayBar]:
-        """Timestamped intraday OHLCV for the Entry Quality Score.
-
-        Returns the last ``days`` sessions of ``interval`` bars (default 20
-        sessions of 5-minute bars) so callers get the current session plus a
-        prior-session baseline for relative-volume-by-time-of-day. This is an
-        OPTIONAL provider capability (not on the abstract contract); callers
-        duck-type it and degrade to insufficient_data when a provider lacks it.
-        A fetch failure raises MarketDataError; empty data returns ``[]``."""
-        try:
-            df = self._ticker(symbol).history(
-                period=f"{max(1, days)}d", interval=interval, auto_adjust=False
-            )
-        except Exception as exc:  # pragma: no cover - network/library errors
-            raise MarketDataError(
-                f"Failed to fetch intraday OHLCV for {symbol}: {exc}"
-            ) from exc
-
-        record_fetch(self.PROVIDER_NAME)
-        if df.empty:
-            return []
-
-        bars: list[IntradayBar] = []
-        for index, row in df.iterrows():
-            ts = index.to_pydatetime()
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=dt.timezone.utc)
-            else:
-                ts = ts.astimezone(dt.timezone.utc)
-            bars.append(
-                IntradayBar(
-                    timestamp=ts,
-                    open=float(row["Open"]),
-                    high=float(row["High"]),
-                    low=float(row["Low"]),
-                    close=float(row["Close"]),
-                    volume=int(row["Volume"]),
-                )
-            )
-        return bars
-
-    def get_fundamentals(self, symbol: str) -> FundamentalsSnapshot:
-        try:
-            info = self._ticker(symbol).info
-        except Exception as exc:  # pragma: no cover - network/library errors
-            raise MarketDataError(f"Failed to fetch fundamentals for {symbol}: {exc}") from exc
-
-        record_fetch(self.PROVIDER_NAME)
-        return FundamentalsSnapshot(
-            symbol=symbol.upper(),
-            long_name=info.get("longName") or info.get("shortName"),
-            sector=info.get("sector"),
-            industry=info.get("industry"),
-            market_cap=info.get("marketCap"),
-            trailing_pe=info.get("trailingPE"),
-            forward_pe=info.get("forwardPE"),
-            peg_ratio=info.get("pegRatio") or info.get("trailingPegRatio"),
-            ev_to_ebitda=info.get("enterpriseToEbitda"),
-            revenue_growth=info.get("revenueGrowth"),
-            earnings_growth=info.get("earningsGrowth"),
-            gross_margins=info.get("grossMargins"),
-            operating_margins=info.get("operatingMargins"),
-            return_on_equity=info.get("returnOnEquity"),
-            free_cashflow=info.get("freeCashflow"),
-            total_debt=info.get("totalDebt"),
-            total_cash=info.get("totalCash"),
-            as_of=dt.datetime.now(dt.timezone.utc),
-        )
-
-    def get_news(self, symbol: str, limit: int = 10) -> list[NewsItem]:
-        try:
-            raw_items = self._ticker(symbol).get_news(count=limit) or []
-        except Exception as exc:  # pragma: no cover - network/library errors
-            raise MarketDataError(f"Failed to fetch news for {symbol}: {exc}") from exc
-
-        record_fetch(self.PROVIDER_NAME)
-        items: list[NewsItem] = []
-        for raw in raw_items[:limit]:
-            content = raw.get("content", raw)
-            url = (
-                (content.get("canonicalUrl") or {}).get("url")
-                or (content.get("clickThroughUrl") or {}).get("url")
-                or ""
-            )
-            pub_date = content.get("pubDate")
-            published_at = (
-                dt.datetime.fromisoformat(pub_date.replace("Z", "+00:00"))
-                if pub_date
-                else dt.datetime.now(dt.timezone.utc)
-            )
-            items.append(
-                NewsItem(
-                    headline=content.get("title", ""),
-                    source_url=url,
-                    published_at=published_at,
-                    category=content.get("contentType"),
-                    summary=content.get("summary"),
-                )
-            )
-        return items
-
-
-def _build_fallback_secondary(name: str) -> MarketDataProvider | None:
-    """Build the failover secondary named by ``market_data_fallback_provider``,
-    or return None when it can't be constructed (missing credentials / API key)
-    so the caller keeps the bare primary. Supported names:
-
-      "webull"      - Webull OpenAPI Market Data (serves daily d1 bars + quotes;
-                      reuses the existing Webull app credentials).
-      "twelve_data" - Twelve Data (proper daily OHLCV; free-tier API key, credit-
-                      gated at 8/min · 800/day - enough for the ~24-symbol scan).
-
-    Both provide the OHLCV/quote calls the daily scan fails over; neither serves
-    fundamentals/news, which the wrapper keeps on the primary."""
-    try:
-        if name == "webull":
-            return get_webull_market_data_provider()
-        if name == "twelve_data":
-            from catalystiq.providers.twelve_data import get_twelve_data_provider
-
-            return get_twelve_data_provider()
-    except Exception:  # missing creds / API key / SDK - skip failover
-        return None
-    return None
-
-
 def get_market_data_provider() -> MarketDataProvider:
-    """Factory returning the configured MarketDataProvider (§config.market_data_provider).
+    """The general market-data (OHLCV/quote) provider: the SAME ordered price
+    chain the opportunity scan uses (``MARKET_DATA_PRIMARY_PROVIDER`` ->
+    ``MARKET_DATA_FALLBACK_PROVIDER``, e.g. Webull -> Twelve Data).
 
-    When ``market_data_fallback_provider`` names a secondary (and its credentials
-    are available), the primary is wrapped in a FallbackMarketDataProvider that
-    fails OHLCV/quote calls over to the secondary ONLY on an upstream rate limit
-    - so a Yahoo throttle no longer empties the universe scan. The wrap is
-    defensive: if the secondary can't be built it is skipped and the bare
-    primary is returned, and the default (no fallback) path is unchanged."""
-    from catalystiq.config import get_settings
-
-    settings = get_settings()
-    provider_name = settings.market_data_provider
-    if provider_name == "yahoo":
-        primary: MarketDataProvider = YahooFinanceProvider()
-    else:
-        raise ValueError(f"Unknown market data provider: {provider_name}")
-
-    fallback = (settings.market_data_fallback_provider or "").strip().lower()
-    if fallback:
-        secondary = _build_fallback_secondary(fallback)
-        if secondary is not None:
-            from catalystiq.providers.fallback_market_data import FallbackMarketDataProvider
-
-            return FallbackMarketDataProvider(primary, secondary)
-    return primary
+    Yahoo has been fully removed. Company fundamentals are served by SEC EDGAR
+    and company news by Finnhub through their OWN providers (see
+    catalystiq/providers/sec_fundamentals.py and finnhub_news.py), NOT this
+    factory - the price chain raises for get_fundamentals/get_news."""
+    return get_scan_market_data_provider()
 
 
 # --- Opportunity-scan price chain -------------------------------------------
@@ -338,15 +109,12 @@ def _build_named_market_data_provider(name: str) -> MarketDataProvider | None:
     name. Raises on an unknown name; a missing-credential failure propagates so
     the caller can decide to skip that leg of the chain.
 
-      "yahoo"       - Yahoo Finance via yfinance (keyless).
       "webull"      - Webull OpenAPI Market Data (daily d1 bars + quotes).
       "twelve_data" - Twelve Data (daily OHLCV + quote) via TWELVE_DATA_API_KEY.
     """
     key = (name or "").strip().lower()
     if not key:
         return None
-    if key == "yahoo":
-        return YahooFinanceProvider()
     if key == "webull":
         return get_webull_market_data_provider()
     if key == "twelve_data":

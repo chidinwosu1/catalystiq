@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { LineChart, TrendingDown, TrendingUp } from "lucide-react";
+import { LineChart } from "lucide-react";
 import SectionCard from "../components/SectionCard";
 import DemoBadge from "../components/DemoBadge";
 import NextAction from "../components/NextAction";
@@ -13,22 +13,7 @@ import {
   type OpportunityScore,
   type SectorPerformance,
 } from "../lib/api";
-import { useLiveQuotes } from "../lib/liveData";
 import type { PageId } from "../types/nav";
-
-// Live market-overview indices/rates -> Yahoo symbols. `pct` marks a rate
-// (10-yr yield) shown with a % suffix. Values are fetched live, not mocked.
-const MARKET_OVERVIEW: { label: string; symbol: string; pct?: boolean }[] = [
-  { label: "S&P 500", symbol: "^GSPC" },
-  { label: "Nasdaq", symbol: "^IXIC" },
-  { label: "Dow", symbol: "^DJI" },
-  { label: "Russell 2000", symbol: "^RUT" },
-  { label: "VIX", symbol: "^VIX" },
-  { label: "10-Year Treasury", symbol: "^TNX", pct: true },
-  { label: "US Dollar Index", symbol: "DX-Y.NYB" },
-  { label: "Oil (WTI)", symbol: "CL=F" },
-  { label: "Gold", symbol: "GC=F" },
-];
 
 interface MarketIntelligencePageProps {
   onTrade: (symbol: string) => void;
@@ -82,12 +67,6 @@ export default function MarketIntelligencePage({
   }, []);
   const topName = watchlist && watchlist.length ? watchlist[0].symbol : "SPY";
 
-  // Live market overview (real quotes; unavailable symbols show "Insufficient
-  // data"). Shared 15s live cache — visibility-aware, deduped across pages.
-  const overviewQuery = useLiveQuotes(MARKET_OVERVIEW.map((m) => m.symbol));
-  const overview = overviewQuery.data ?? [];
-  const overviewBySymbol = new Map(overview.map((q) => [q.symbol.toUpperCase(), q]));
-
   // Live sector performance (deterministic, from real ETF history).
   const [sectors, setSectors] = useState<SectorPerformance[] | null>(null);
   useEffect(() => {
@@ -121,50 +100,11 @@ export default function MarketIntelligencePage({
       <div>
         <h1 className="text-xl font-semibold text-ink-primary">Market Analysis</h1>
         <p className="mt-1 text-sm text-ink-secondary">
-          Market Overview, sector ranking, and the rule-based watchlist are live. Only the
+          Sector ranking and the rule-based watchlist are live. Only the
           sections marked <span className="font-medium text-status-warning">Demo data</span> below
           remain illustrative (no validated source yet).
         </p>
       </div>
-
-      <SectionCard title="Market Overview" description="Live index, rate, and commodity levels">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {MARKET_OVERVIEW.map(({ label, symbol, pct }) => {
-            const q = overviewBySymbol.get(symbol.toUpperCase());
-            const ok = q && q.status === "ok" && q.price !== null;
-            const cp = ok ? q!.change_pct : null;
-            return (
-              <div key={symbol} className="rounded-lg border border-border px-3 py-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-ink-primary">{label}</span>
-                  {cp !== null && cp !== undefined ? (
-                    <span
-                      className={`flex items-center gap-1 text-sm font-semibold ${
-                        cp >= 0 ? "text-status-good" : "text-status-critical"
-                      }`}
-                    >
-                      {cp >= 0 ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
-                      {cp >= 0 ? "+" : ""}
-                      {cp.toFixed(2)}%
-                    </span>
-                  ) : (
-                    <span className="text-xs text-ink-muted">—</span>
-                  )}
-                </div>
-                <p className="mt-0.5 text-lg font-semibold text-ink-primary">
-                  {ok ? (
-                    pct
-                      ? `${q!.price!.toFixed(2)}%`
-                      : q!.price!.toLocaleString(undefined, { maximumFractionDigits: 2 })
-                  ) : (
-                    <span className="text-sm font-normal text-ink-muted">Insufficient data</span>
-                  )}
-                </p>
-              </div>
-            );
-          })}
-        </div>
-      </SectionCard>
 
       <SectionCard
         title="Industry Sector Ranking"
